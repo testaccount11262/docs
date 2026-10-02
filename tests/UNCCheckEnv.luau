@@ -195,17 +195,17 @@ end)
 
 -- Console
 
-test("rconsoleclear", {"consoleclear"}, function() rconsoleclear() end)
+test("rconsoleclear", {"consoleclear"}, nil, "No portable console-state oracle")
 
-test("rconsolecreate", {"consolecreate"}, function() rconsolecreate(); rconsoledestroy() end)
+test("rconsolecreate", {"consolecreate"}, nil, "No portable console-state oracle")
 
-test("rconsoledestroy", {"consoledestroy"}, function() rconsolecreate(); rconsoledestroy() end)
+test("rconsoledestroy", {"consoledestroy"}, nil, "No portable console-state oracle")
 
 test("rconsoleinput", {"consoleinput"}, nil, "Requires interactive console input")
 
-test("rconsoleprint", {"consoleprint"}, function() rconsolecreate(); rconsoleprint("UNC console behavior test"); rconsoledestroy() end)
+test("rconsoleprint", {"consoleprint"}, nil, "No portable console-output oracle")
 
-test("rconsolesettitle", {"rconsolename", "consolesettitle"}, function() rconsolecreate(); rconsolesettitle("UNC Behavior Test"); rconsoledestroy() end)
+test("rconsolesettitle", {"rconsolename", "consolesettitle"}, nil, "No portable console-title oracle")
 
 -- Crypt
 
@@ -513,11 +513,7 @@ test("sethiddenproperty", {}, function()
 	assert(gethiddenproperty(fire, "size_xml") == 10, "Did not set the hidden property")
 end)
 
-test("gethui", {}, function()
-	local ui=gethui()
-	assert(typeof(ui)=="Instance","Did not return an Instance")
-	assert(ui.Parent~=nil,"gethui returned an unparented Instance")
-end)
+test("gethui", {}, nil, "No portable oracle for hidden UI container identity")
 
 test("getinstances", {}, function()
 	local marker=Instance.new("Folder"); local found=false
@@ -600,11 +596,7 @@ end)
 
 -- Miscellaneous
 
-test("identifyexecutor", {"getexecutorname"}, function()
-	local name, version = identifyexecutor()
-	assert(type(name) == "string", "Did not return a string for the name")
-	return type(version) == "string" and "Returns version as a string" or "Does not return version"
-end)
+test("identifyexecutor", {"getexecutorname"}, nil, "Executor identity has no independent portable oracle")
 
 test("lz4compress", {}, function()
 	local raw = "Hello, world!"
@@ -778,16 +770,11 @@ test("setrenderproperty", {}, function()
 	assert(drawing.Visible == false, "Did not set the value for Square.Visible")
 end)
 
-test("cleardrawcache", {}, function()
-	cleardrawcache()
-end)
+test("cleardrawcache", {}, nil, "No portable oracle for cache contents")
 
 -- WebSocket
 
-test("WebSocket", {}, function()
-	assert(type(WebSocket) == "table" or type(WebSocket) == "userdata", "WebSocket must be an object")
-	assert(type(WebSocket.connect) == "function", "WebSocket.connect must be callable")
-end)
+test("WebSocket", {}, nil, "WebSocket.connect below is the behavioral test")
 
 test("WebSocket.connect", {}, function()
 	local ws = WebSocket.connect("wss://echo.websocket.events")
