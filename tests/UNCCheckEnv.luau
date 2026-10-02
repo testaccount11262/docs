@@ -212,6 +212,8 @@ test("newcclosure", {}, function()
 	assert(test() == testC(), "New C closure should return the same value as the original")
 	assert(test ~= testC, "New C closure should not be same as the original")
 	assert(iscclosure(testC), "New C closure should be a C closure")
+	local source = debug.info(testC, "s")
+	assert(source == "[C]", "debug.info did not identify newcclosure as a C closure (source: " .. tostring(source) .. ")")
 end)
 
 -- Console
@@ -231,26 +233,40 @@ test("rconsolesettitle", {"rconsolename", "consolesettitle"}, nil, "No portable 
 -- Crypt
 
 test("crypt.base64encode", {"crypt.base64.encode", "crypt.base64_encode", "base64.encode", "base64_encode"}, function()
-	assert(crypt.base64encode("test") == "dGVzdA==", "Base64 encoding failed")
+	local input = "UNC_BASE64_TEST_\0\255"
+	local encoded = crypt.base64encode(input)
+	assert(type(encoded) == "string", "Base64 encoding did not return a string")
+	assert(encoded ~= input, "Base64 encoding returned the input unchanged")
+	assert(encoded == "VU5DX0JBU0U2NF9URVNUXwD/", "Base64 encoding returned an unexpected value")
+	assert(crypt.base64decode(encoded) == input, "Base64 encode/decode did not round-trip")
 end)
 
 test("crypt.base64decode", {"crypt.base64.decode", "crypt.base64_decode", "base64.decode", "base64_decode"}, function()
-	assert(crypt.base64decode("dGVzdA==") == "test", "Base64 decoding failed")
+	local encoded = "VU5DX0JBU0U2NF9URVNUXwD/"
+	local decoded = crypt.base64decode(encoded)
+	assert(type(decoded) == "string", "Base64 decoding did not return a string")
+	assert(decoded ~= encoded, "Base64 decoding returned the encoded input unchanged")
+	assert(decoded == "UNC_BASE64_TEST_\0\255", "Base64 decoding returned an unexpected value")
 end)
 
 test("crypt.encrypt", {}, function()
 	local key = crypt.generatekey()
-	local encrypted, iv = crypt.encrypt("test", key, nil, "CBC")
-	assert(iv, "crypt.encrypt should return an IV")
-	local decrypted = crypt.decrypt(encrypted, key, iv, "CBC")
-	assert(decrypted == "test", "Failed to decrypt raw string from encrypted data")
+	local iv = crypt.generatebytes(16)
+	local encrypted, returnedIv = crypt.encrypt("UNC_ENCRYPT_TEST", key, iv, "CBC")
+	assert(type(encrypted) == "string", "crypt.encrypt did not return ciphertext")
+	assert(encrypted ~= "UNC_ENCRYPT_TEST", "crypt.encrypt returned plaintext unchanged")
+	assert(returnedIv == nil or returnedIv == iv, "crypt.encrypt changed the supplied IV unexpectedly")
+	assert(crypt.decrypt(encrypted, key, iv, "CBC") == "UNC_ENCRYPT_TEST", "crypt.encrypt/crypt.decrypt did not round-trip")
 end)
 
 test("crypt.decrypt", {}, function()
-	local key, iv = crypt.generatekey(), crypt.generatekey()
-	local encrypted = crypt.encrypt("test", key, iv, "CBC")
+	local key = crypt.generatekey()
+	local iv = crypt.generatebytes(16)
+	local encrypted = crypt.encrypt("UNC_DECRYPT_TEST", key, iv, "CBC")
+	assert(encrypted ~= "UNC_DECRYPT_TEST", "Encryption produced plaintext")
 	local decrypted = crypt.decrypt(encrypted, key, iv, "CBC")
-	assert(decrypted == "test", "Failed to decrypt raw string from encrypted data")
+	assert(decrypted == "UNC_DECRYPT_TEST", "crypt.decrypt did not recover the original plaintext")
+	assert(decrypted ~= encrypted, "crypt.decrypt returned ciphertext unchanged")
 end)
 
 test("crypt.generatebytes", {}, function()
@@ -265,10 +281,21 @@ test("crypt.generatekey", {}, function()
 end)
 
 test("crypt.hash", {}, function()
-	local algorithms = {'sha1', 'sha384', 'sha512', 'md5', 'sha256', 'sha3-224', 'sha3-256', 'sha3-512'}
-	for _, algorithm in ipairs(algorithms) do
+	local expected = {
+		md5 = "098f6bcd4621d373cade4e832627b4f6",
+		sha1 = "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+		sha384 = "768412320f7b0aa5812fce428dc4706b3cae50e02a64caa16a782249bfe8efc4b7ef1ccb126255d196047dfedf17a0a9",
+		sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+		sha512 = "ee26b0dd4af7e749aa1a8ee3c10ae9923f618980772e473f8819a5d4940e0db27ac185f8a0e1d5f84f88bc887fd67b143732c304cc5fa9ad8e6f57f50028a8ff",
+		["sha3-224"] = "3797bf0afbbfca4a7bbba7602a2b552746876517a7f9b7ce2db0ae7b",
+		["sha3-256"] = "36f028580bb02cc8272a9a020f4200e346e276ae664e45ee80745574e2f5ab80",
+		["sha3-512"] = "9ece086e9bac491fac5c1d1046ca11d737b92a2b2ebd93f005d7b710110c0a678288166e7fbe796883a4f2e9b3ca9f484f521d0ce464345cc1aec96779149c14",
+	}
+	for algorithm, digest in pairs(expected) do
 		local hash = crypt.hash("test", algorithm)
-		assert(hash, "crypt.hash on algorithm '" .. algorithm .. "' should return a hash")
+		assert(type(hash) == "string", "crypt.hash did not return a string for " .. algorithm)
+		assert(hash == digest, "crypt.hash returned an unexpected digest for " .. algorithm)
+		assert(hash ~= "test", "crypt.hash returned the input unchanged for " .. algorithm)
 	end
 end)
 
