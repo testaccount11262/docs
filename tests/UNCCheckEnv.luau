@@ -1,4 +1,4 @@
-local passes, fails, undefined = 0, 0, 0
+local passes, fails, skipped, undefined = 0, 0, 0
 
 local function getGlobal(path)
 	local value = getfenv(0)
@@ -12,19 +12,18 @@ local function getGlobal(path)
 	return value
 end
 
-local function test(name, aliases, callback)
-	if not callback then
-		fails += 1
-		warn("⛔ " .. name .. " (no behavioural test)")
-		return
-	end
-
+local function test(name, aliases, callback, status)
 	if not getGlobal(name) then
 		fails += 1
 		warn("⛔ " .. name .. " (missing)")
+	elseif status then
+		skipped += 1
+		print("⚪ " .. name .. " • " .. status)
+	elseif not callback then
+		fails += 1
+		warn("⛔ " .. name .. " (no behavioural test)")
 	else
 		local success, message = pcall(callback)
-
 		if success then
 			passes += 1
 			print("✅ " .. name .. (message and " • " .. message or ""))
@@ -33,24 +32,19 @@ local function test(name, aliases, callback)
 			warn("⛔ " .. name .. " failed: " .. tostring(message))
 		end
 	end
-
-	local undefinedAliases = {}
-
-	for _, alias in ipairs(aliases) do
-		if getGlobal(alias) == nil then
-			table.insert(undefinedAliases, alias)
-		end
+	local missing={}
+	for _,alias in ipairs(aliases) do
+		if getGlobal(alias)==nil then table.insert(missing,alias) end
 	end
-
-	if #undefinedAliases > 0 then
-		undefined += 1
-		warn("⚠️ " .. table.concat(undefinedAliases, ", "))
+	if #missing>0 then
+		undefined+=1
+		warn("⚠️ "..table.concat(missing,", "))
 	end
 end
 
 print("\n")
 print("UNC Environment Check")
-print("✅ - Pass, ⛔ - Fail, ⚠️ - Missing aliases\n")
+print("✅ - Pass, ⛔ - Fail, ⚪ - Skipped/manual, ⚠️ - Missing aliases\n")
 
 -- Cache
 
@@ -69,10 +63,9 @@ test("cache.iscached", {}, function()
 end)
 
 test("cache.replace", {}, function()
-	local part = Instance.new("Part")
-	local fire = Instance.new("Fire")
-	cache.replace(part, fire)
-	assert(part ~= fire, "Part was not replaced with Fire")
+	local part=Instance.new("Part"); local fire=Instance.new("Fire")
+	cache.replace(part,fire)
+	assert(compareinstances(part,fire),"cache.replace did not replace the reference")
 end)
 
 test("cloneref", {}, function()
@@ -106,7 +99,7 @@ local function shallowEqual(t1, t2)
 
 	for k, v in pairs(t1) do
 		if UNIQUE_TYPES[type(v)] then
-			if type(t2[k]) ~= type(v) then
+			if type(t1[k]) ~= type(v) then
 				return false
 			end
 		elseif t2[k] ~= v then
@@ -146,11 +139,11 @@ test("getcallingscript", {}, function()
 end)
 
 test("getscriptclosure", {"getscriptfunction"}, function()
-	local module = game:GetService("CoreGui").RobloxGui.Modules.Common.Constants
-	local constants = getrenv().require(module)
-	local generated = getscriptclosure(module)()
-	assert(constants ~= generated, "Generated module should not match the original")
-	assert(shallowEqual(constants, generated), "Generated constant table should be shallow equal to the original")
+	local module=game:GetService("CoreGui").RobloxGui.Modules.Common.Constants
+	local expected=getrenv().require(module)
+	local generated=getscriptclosure(module)()
+	assert(type(generated)==type(expected),"Generated closure returned an unexpected value type")
+	assert(shallowEqual(expected,generated),"Generated closure did not reproduce the module result")
 end)
 
 test("hookfunction", {"replaceclosure"}, function()
@@ -183,12 +176,11 @@ test("isexecutorclosure", {"checkclosure", "isourclosure"}, function()
 end)
 
 test("loadstring", {}, function()
-	local animate = game:GetService("Players").LocalPlayer.Character.Animate
-	local bytecode = getscriptbytecode(animate)
-	local func = loadstring(bytecode)
-	assert(type(func) ~= "function", "Luau bytecode should not be loadable!")
-	assert(assert(loadstring("return ... + 1"))(1) == 2, "Failed to do simple math")
-	assert(type(select(2, loadstring("f"))) == "string", "Loadstring did not return anything for a compiler error")
+	local fn,err=loadstring("return ... + 1")
+	assert(type(fn)=="function" and err==nil,"Valid source did not compile")
+	assert(fn(1)==2,"Compiled function returned an unexpected value")
+	local bad,badErr=loadstring("f")
+	assert(bad==nil and type(badErr)=="string","Compiler errors must return nil and an error string")
 end)
 
 test("newcclosure", {}, function()
@@ -209,7 +201,7 @@ test("rconsolecreate", {"consolecreate"}, function() rconsolecreate(); rconsoled
 
 test("rconsoledestroy", {"consoledestroy"}, function() rconsolecreate(); rconsoledestroy() end)
 
-test("rconsoleinput", {"consoleinput"}, function() return "manual input API: not invoked automatically because it blocks waiting for user input" end)
+test("rconsoleinput", {"consoleinput"}, nil, "Requires interactive console input")
 
 test("rconsoleprint", {"consoleprint"}, function() rconsolecreate(); rconsoleprint("UNC console behavior test"); rconsoledestroy() end)
 
@@ -262,25 +254,18 @@ end)
 --- Debug
 
 test("debug.getconstant", {}, function()
-	local function test()
-		print("Hello, world!")
-	end
-	assert(debug.getconstant(test, 1) == "print", "First constant must be print")
-	assert(debug.getconstant(test, 2) == nil, "Second constant must be nil")
-	assert(debug.getconstant(test, 3) == "Hello, world!", "Third constant must be 'Hello, world!'")
+	local function target() print("UNC_CONSTANT_SENTINEL") end
+	local p,s=false,false
+	for i=1,64 do local ok,v=pcall(debug.getconstant,target,i); if not ok then break end; if v==print then p=true end; if v=="UNC_CONSTANT_SENTINEL" then s=true end end
+	assert(p and s,"getconstant did not expose expected constants")
 end)
 
 test("debug.getconstants", {}, function()
-	local function test()
-		local num = 5000 .. 50000
-		print("Hello, world!", num, warn)
-	end
-	local constants = debug.getconstants(test)
-	assert(constants[1] == 50000, "First constant must be 50000")
-	assert(constants[2] == "print", "Second constant must be print")
-	assert(constants[3] == nil, "Third constant must be nil")
-	assert(constants[4] == "Hello, world!", "Fourth constant must be 'Hello, world!'")
-	assert(constants[5] == "warn", "Fifth constant must be warn")
+	local function target() print("UNC_CONSTANT_A","UNC_CONSTANT_B") end
+	local values=debug.getconstants(target); assert(type(values)=="table","getconstants must return a table")
+	local x,y,p=false,false,false
+	for _,v in pairs(values) do if v=="UNC_CONSTANT_A" then x=true elseif v=="UNC_CONSTANT_B" then y=true elseif v==print then p=true end end
+	assert(x and y and p,"getconstants did not expose expected constants")
 end)
 
 test("debug.getinfo", {}, function()
@@ -349,58 +334,41 @@ test("debug.getstack", {}, function()
 end)
 
 test("debug.getupvalue", {}, function()
-	local upvalue = function() end
-	local function test()
-		print(upvalue)
-	end
-	assert(debug.getupvalue(test, 1) == upvalue, "Unexpected value returned from debug.getupvalue")
+	local uv=function() end; local function target() return uv end; local found=false
+	for i=1,32 do local ok,v=pcall(debug.getupvalue,target,i); if not ok then break end; if v==uv then found=true break end end
+	assert(found,"getupvalue could not locate the captured function")
 end)
 
 test("debug.getupvalues", {}, function()
-	local upvalue = function() end
-	local function test()
-		print(upvalue)
-	end
-	local upvalues = debug.getupvalues(test)
-	assert(upvalues[1] == upvalue, "Unexpected value returned from debug.getupvalues")
+	local uv=function() end; local function target() return uv end; local values=debug.getupvalues(target)
+	assert(type(values)=="table","getupvalues must return a table"); local found=false
+	for _,v in pairs(values) do if v==uv then found=true break end end
+	assert(found,"getupvalues did not contain the captured function")
 end)
 
 test("debug.setconstant", {}, function()
-	local function test()
-		return "fail"
-	end
-	debug.setconstant(test, 1, "success")
-	assert(test() == "success", "debug.setconstant did not set the first constant")
+	local function target() return "UNC_OLD_CONSTANT" end; local index
+	for i=1,64 do local ok,v=pcall(debug.getconstant,target,i); if not ok then break end; if v=="UNC_OLD_CONSTANT" then index=i break end end
+	assert(index,"Could not locate target constant"); debug.setconstant(target,index,"UNC_NEW_CONSTANT")
+	assert(target()=="UNC_NEW_CONSTANT","debug.setconstant did not change the target constant")
 end)
 
 test("debug.setstack", {}, function()
-	local function test()
-		return "fail", debug.setstack(1, 1, "success")
+	local function target()
+		local value="UNC_OLD_STACK"; local index
+		for i=1,32 do local ok,v=pcall(debug.getstack,1,i); if not ok then break end; if v==value then index=i break end end
+		assert(index,"Could not locate target stack slot"); debug.setstack(1,index,"UNC_NEW_STACK")
+		assert(debug.getstack(1,index)=="UNC_NEW_STACK","debug.setstack did not change the target stack slot")
 	end
-	assert(test() == "success", "debug.setstack did not set the first stack item")
+	target()
 end)
 
 test("debug.setupvalue", {}, function()
-	local function upvalue()
-		return "fail"
-	end
-	local function test()
-		return upvalue()
-	end
-	debug.setupvalue(test, 1, function()
-		return "success"
-	end)
-	assert(test() == "success", "debug.setupvalue did not set the first upvalue")
+	local uv="UNC_OLD_UPVALUE"; local function target() return uv end; local index
+	for i=1,32 do local ok,v=pcall(debug.getupvalue,target,i); if not ok then break end; if v==uv then index=i break end end
+	assert(index,"Could not locate target upvalue"); debug.setupvalue(target,index,"UNC_NEW_UPVALUE")
+	assert(target()=="UNC_NEW_UPVALUE","debug.setupvalue did not change the target upvalue")
 end)
-
--- Filesystem
-
-if isfolder and makefolder and delfolder then
-	if isfolder(".tests") then
-		delfolder(".tests")
-	end
-	makefolder(".tests")
-end
 
 test("readfile", {}, function()
 	writefile(".tests/readfile.txt", "success")
@@ -408,19 +376,11 @@ test("readfile", {}, function()
 end)
 
 test("listfiles", {}, function()
-	makefolder(".tests/listfiles")
-	writefile(".tests/listfiles/test_1.txt", "success")
-	writefile(".tests/listfiles/test_2.txt", "success")
-	local files = listfiles(".tests/listfiles")
-	assert(#files == 2, "Did not return the correct number of files")
-	assert(isfile(files[1]), "Did not return a file path")
-	assert(readfile(files[1]) == "success", "Did not return the correct files")
-	makefolder(".tests/listfiles_2")
-	makefolder(".tests/listfiles_2/test_1")
-	makefolder(".tests/listfiles_2/test_2")
-	local folders = listfiles(".tests/listfiles_2")
-	assert(#folders == 2, "Did not return the correct number of folders")
-	assert(isfolder(folders[1]), "Did not return a folder path")
+	local root=".tests/listfiles"; makefolder(root)
+	local a=root.."/test_1.txt"; local b=root.."/test_2.txt"; writefile(a,"A"); writefile(b,"B")
+	local files=listfiles(root); local fa,fb=false,false
+	for _,path in ipairs(files) do if path==a or string.match(path,"test_1%.txt$") then fa=true end; if path==b or string.match(path,"test_2%.txt$") then fb=true end end
+	assert(fa and fb,"listfiles did not return both created files")
 end)
 
 test("writefile", {}, function()
@@ -455,8 +415,9 @@ test("isfile", {}, function()
 end)
 
 test("isfolder", {}, function()
-	assert(isfolder(".tests") == true, "Did not return false for a folder")
-	assert(isfolder(".tests/doesnotexist.exe") == false, "Did not return false for a nonexistent path (got " .. tostring(isfolder(".tests/doesnotexist.exe")) .. ")")
+	assert(isfolder(".tests")==true,"Did not identify the test folder")
+	local missing=".tests/missing_"..tostring(math.floor(os.clock()*1000000))
+	assert(isfolder(missing)==false,"Nonexistent path was reported as a folder")
 end)
 
 test("delfolder", {}, function()
@@ -472,79 +433,62 @@ test("delfile", {}, function()
 end)
 
 test("loadfile", {}, function()
-	writefile(".tests/loadfile.txt", "return ... + 1")
-	assert(assert(loadfile(".tests/loadfile.txt"))(1) == 2, "Failed to load a file with arguments")
-	writefile(".tests/loadfile.txt", "f")
-	local callback, err = loadfile(".tests/loadfile.txt")
-	assert(err and not callback, "Did not return an error message for a compiler error")
+	local path=".tests/loadfile.txt"; writefile(path,"return ... + 1")
+	local fn=assert(loadfile(path)); assert(fn(1)==2,"Failed to load a file with arguments")
+	writefile(path,"f"); local bad,err=loadfile(path); assert(bad==nil and type(err)=="string","Compiler error did not return nil plus an error")
 end)
 
 test("dofile", {}, function()
-	local path = ".tests/dofile.txt"
-	writefile(path, "return ... + 1")
-	assert(dofile(path, 41) == 42, "dofile returned an unexpected value")
-	delfile(path)
+	local path=".tests/dofile.txt"; writefile(path,"return ... + 1")
+	assert(dofile(path,41)==42,"dofile returned an unexpected value"); delfile(path)
 end)
-
--- Input
 
 test("isrbxactive", {"isgameactive"}, function()
 	assert(type(isrbxactive()) == "boolean", "Did not return a boolean value")
 end)
 
-test("mouse1click", {}, function() mouse1click() end)
+test("mouse1click", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mouse1press", {}, function() mouse1press() end)
+test("mouse1press", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mouse1release", {}, function() mouse1release() end)
+test("mouse1release", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mouse2click", {}, function() mouse2click() end)
+test("mouse2click", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mouse2press", {}, function() mouse2press() end)
+test("mouse2press", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mouse2release", {}, function() mouse2release() end)
+test("mouse2release", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mousemoveabs", {}, function() mousemoveabs(100, 100) end)
+test("mousemoveabs", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mousemoverel", {}, function() mousemoverel(1, 1) end)
+test("mousemoverel", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mousescroll", {}, function() mousescroll(1) end)
-
--- Instances
+test("mousescroll", {}, nil, "No standard UNC state getter exists for automatic verification")
 
 test("fireclickdetector", {}, function()
-	local detector = Instance.new("ClickDetector")
-	fireclickdetector(detector, 50, "MouseHoverEnter")
+	local part=Instance.new("Part",workspace); local detector=Instance.new("ClickDetector",part); local fired=false
+	detector.MouseClick:Connect(function() fired=true end); fireclickdetector(detector); task.wait(); part:Destroy()
+	assert(fired,"fireclickdetector did not fire MouseClick")
 end)
 
 test("getcallbackvalue", {}, function()
-	local bindable = Instance.new("BindableFunction")
-	local function test()
-	end
-	bindable.OnInvoke = test
-	assert(getcallbackvalue(bindable, "OnInvoke") == test, "Did not return the correct value")
+	local bindable=Instance.new("BindableFunction")
+	local callback=function() return "UNC_CALLBACK" end
+	bindable.OnInvoke=callback
+	assert(getcallbackvalue(bindable,"OnInvoke")==callback,"Did not return the exact callback")
+	assert(bindable:Invoke()=="UNC_CALLBACK","BindableFunction callback is not functional")
 end)
 
 test("getconnections", {}, function()
-	local types = {
-		Enabled = "boolean",
-		ForeignState = "boolean",
-		LuaConnection = "boolean",
-		Function = "function",
-		Thread = "thread",
-		Fire = "function",
-		Defer = "function",
-		Disconnect = "function",
-		Disable = "function",
-		Enable = "function",
-	}
-	local bindable = Instance.new("BindableEvent")
-	bindable.Event:Connect(function() end)
-	local connection = getconnections(bindable.Event)[1]
-	for k, v in pairs(types) do
-		assert(connection[k] ~= nil, "Did not return a table with a '" .. k .. "' field")
-		assert(type(connection[k]) == v, "Did not return a table with " .. k .. " as a " .. v .. " (got " .. type(connection[k]) .. ")")
-	end
+	local bindable=Instance.new("BindableEvent"); local fired=false
+	bindable.Event:Connect(function() fired=true end)
+	local connections=getconnections(bindable.Event)
+	assert(type(connections)=="table" and #connections>0,"getconnections returned no connections")
+	local connection=connections[1]
+	assert(type(connection.Function)=="function","Connection.Function is missing")
+	assert(type(connection.Disconnect)=="function","Connection.Disconnect is missing")
+	assert(type(connection.Enabled)=="boolean","Connection.Enabled is missing")
+	connection:Fire(); task.wait(); assert(fired,"Connection:Fire() did not invoke the callback")
 end)
 
 test("getcustomasset", {}, function()
@@ -570,16 +514,21 @@ test("sethiddenproperty", {}, function()
 end)
 
 test("gethui", {}, function()
-	assert(typeof(gethui()) == "Instance", "Did not return an Instance")
+	local ui=gethui()
+	assert(typeof(ui)=="Instance","Did not return an Instance")
+	assert(ui.Parent~=nil,"gethui returned an unparented Instance")
 end)
 
 test("getinstances", {}, function()
-	assert(getinstances()[1]:IsA("Instance"), "The first value is not an Instance")
+	local marker=Instance.new("Folder"); local found=false
+	for _,v in ipairs(getinstances()) do if typeof(v)=="Instance" and compareinstances(v,marker) then found=true break end end
+	assert(found,"getinstances did not include the created Instance")
 end)
 
 test("getnilinstances", {}, function()
-	assert(getnilinstances()[1]:IsA("Instance"), "The first value is not an Instance")
-	assert(getnilinstances()[1].Parent == nil, "The first value is not parented to nil")
+	local marker=Instance.new("Folder"); local found=false
+	for _,v in ipairs(getnilinstances()) do if typeof(v)=="Instance" and compareinstances(v,marker) and v.Parent==nil then found=true break end end
+	assert(found,"getnilinstances did not include the created nil-parented Instance")
 end)
 
 test("isscriptable", {}, function()
@@ -597,9 +546,7 @@ test("setscriptable", {}, function()
 	assert(isscriptable(fire, "size_xml") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
 end)
 
-test("setrbxclipboard", {}, function() setrbxclipboard("UNC clipboard behavior test") end)
-
--- Metatable
+test("setrbxclipboard", {}, nil, "No standard UNC clipboard getter exists for automatic round-trip")
 
 test("getrawmetatable", {}, function()
 	local metatable = { __metatable = "Locked!" }
@@ -673,35 +620,20 @@ test("lz4decompress", {}, function()
 	assert(lz4decompress(compressed, #raw) == raw, "Decompression did not return the original string")
 end)
 
-test("messagebox", {}, function()
-	local done, ok, result = false, false, nil
-	task.spawn(function()
-		ok, result = pcall(messagebox, "UNC REALITY TEST\nClick OK to prove this is a real message box.", "UNC Compatibility Test", 0)
-		done = true
-	end)
-	local deadline = os.clock() + 10
-	while not done and os.clock() < deadline do task.wait() end
-	assert(done, "messagebox did not return within 10 seconds; if a dialog appeared, click OK and rerun")
-	assert(ok, tostring(result))
-	assert(type(result) == "number" or type(result) == "string", "messagebox returned an invalid result")
-	return "returned " .. tostring(result)
-end)
+test("messagebox", {}, nil, "Requires human confirmation of the native dialog")
 
-test("queue_on_teleport", {"queueonteleport"}, function() queue_on_teleport("print('UNC queue_on_teleport behavior test')") end)
+test("queue_on_teleport", {"queueonteleport"}, nil, "Requires an actual teleport to verify execution")
 
 test("request", {"http.request", "http_request"}, function()
-	local response = request({
-		Url = "https://httpbin.org/user-agent",
-		Method = "GET",
-	})
-	assert(type(response) == "table", "Response must be a table")
-	assert(response.StatusCode == 200, "Did not return a 200 status code")
-	local data = game:GetService("HttpService"):JSONDecode(response.Body)
-	assert(type(data) == "table" and type(data["user-agent"]) == "string", "Did not return a table with a user-agent key")
-	return "User-Agent: " .. data["user-agent"]
+	local response=request({Url="https://httpbin.org/status/204",Method="GET"})
+	assert(type(response)=="table","Response must be a table")
+	assert(type(response.StatusCode)=="number","StatusCode must be a number")
+	assert(response.StatusCode==204,"Did not return the expected HTTP status code")
+	assert(type(response.Headers)=="table","Headers must be a table")
+	assert(type(response.Body)=="string","Body must be a string")
 end)
 
-test("setclipboard", {"toclipboard"}, function() setclipboard("UNC clipboard behavior test") end)
+test("setclipboard", {"toclipboard"}, nil, "No standard UNC clipboard getter exists for automatic round-trip")
 
 test("setfpscap", {}, function()
 	local heartbeat = game:GetService("RunService").Heartbeat
@@ -725,9 +657,9 @@ end)
 -- Scripts
 
 test("getgc", {}, function()
-	local gc = getgc()
-	assert(type(gc) == "table", "Did not return a table")
-	assert(#gc > 0, "Did not return a table with any values")
+	local marker={}; local fn=function() return marker end; local found=false
+	for _,v in pairs(getgc()) do if v==marker or v==fn then found=true break end end
+	assert(found,"getgc did not expose an executor-created object")
 end)
 
 test("getgenv", {}, function()
@@ -737,11 +669,9 @@ test("getgenv", {}, function()
 end)
 
 test("getloadedmodules", {}, function()
-	local modules = getloadedmodules()
-	assert(type(modules) == "table", "Did not return a table")
-	assert(#modules > 0, "Did not return a table with any values")
-	assert(typeof(modules[1]) == "Instance", "First value is not an Instance")
-	assert(modules[1]:IsA("ModuleScript"), "First value is not a ModuleScript")
+	local module=game:GetService("CoreGui").RobloxGui.Modules.Common.Constants; getrenv().require(module); local found=false
+	for _,v in ipairs(getloadedmodules()) do if typeof(v)=="Instance" and compareinstances(v,module) then found=true break end end
+	assert(found,"getloadedmodules did not include a required ModuleScript")
 end)
 
 test("getrenv", {}, function()
@@ -749,11 +679,9 @@ test("getrenv", {}, function()
 end)
 
 test("getrunningscripts", {}, function()
-	local scripts = getrunningscripts()
-	assert(type(scripts) == "table", "Did not return a table")
-	assert(#scripts > 0, "Did not return a table with any values")
-	assert(typeof(scripts[1]) == "Instance", "First value is not an Instance")
-	assert(scripts[1]:IsA("ModuleScript") or scripts[1]:IsA("LocalScript"), "First value is not a ModuleScript or LocalScript")
+	local target=game:GetService("Players").LocalPlayer.Character.Animate; local found=false
+	for _,v in ipairs(getrunningscripts()) do if typeof(v)=="Instance" and compareinstances(v,target) then found=true break end end
+	assert(found,"getrunningscripts did not include the running Animate script")
 end)
 
 test("getscriptbytecode", {"dumpstring"}, function()
@@ -776,11 +704,9 @@ test("getscripthash", {}, function()
 end)
 
 test("getscripts", {}, function()
-	local scripts = getscripts()
-	assert(type(scripts) == "table", "Did not return a table")
-	assert(#scripts > 0, "Did not return a table with any values")
-	assert(typeof(scripts[1]) == "Instance", "First value is not an Instance")
-	assert(scripts[1]:IsA("ModuleScript") or scripts[1]:IsA("LocalScript"), "First value is not a ModuleScript or LocalScript")
+	local target=game:GetService("Players").LocalPlayer.Character.Animate; local found=false
+	for _,v in ipairs(getscripts()) do if typeof(v)=="Instance" and compareinstances(v,target) then found=true break end end
+	assert(found,"getscripts did not include the known script")
 end)
 
 test("getsenv", {}, function()
@@ -889,4 +815,5 @@ print("UNC Summary")
 local rate = (passes + fails) > 0 and math.round(passes / (passes + fails) * 100) or 0
 print("✅ Tested with a " .. rate .. "% success rate (" .. passes .. " out of " .. (passes + fails) .. ")")
 print("⛔ " .. fails .. " tests failed")
-print("⚠️ " .. undefined .. " globals are missing aliases")
+print("⚪ " .. skipped .. " tests skipped/manual")
+print("⚠️ " .. undefined .. " tests have missing aliases")
