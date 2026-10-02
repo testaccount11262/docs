@@ -820,10 +820,25 @@ test("getscripts", {}, function()
 end)
 
 test("getsenv", {}, function()
-	local animate = game:GetService("Players").LocalPlayer.Character.Animate
-	local env = getsenv(animate)
-	assert(type(env) == "table", "Did not return a table for Character.Animate (a " .. animate.ClassName .. ")")
-	assert(env.script == animate, "The script global is not identical to Character.Animate")
+	local localScript = Instance.new("LocalScript")
+	localScript.Name = "__UNC_GETSENV_TEST__"
+	localScript.Source = [[
+		local function __UNC_GETSENV_FUNCTION()
+			return "__UNC_GETSENV_OK__"
+		end
+		__UNC_GETSENV_VALUE = "__UNC_GETSENV_VALUE__"
+		__UNC_GETSENV_FUNCTION_REF = __UNC_GETSENV_FUNCTION
+	]]
+	localScript.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+	local env = getsenv(localScript)
+	assert(type(env) == "table", "getsenv did not return an environment table")
+	assert(env.script == localScript, "getsenv().script is not the target LocalScript")
+	assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
+	assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
+	assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
+
+	localScript:Destroy()
 end)
 
 test("thread identity", {"getthreadidentity", "getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
