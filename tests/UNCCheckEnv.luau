@@ -341,44 +341,47 @@ end)
 test("debug.getproto", {}, function()
 	local function test()
 		local function proto()
-			return true
+			return "UNC_PROTO_1"
 		end
 	end
-	local proto = debug.getproto(test, 1, true)[1]
-	local realproto = debug.getproto(test, 1)
-	assert(proto, "Failed to get the inner function")
-	assert(proto() == true, "The inner function did not return anything")
-	if not realproto() then
-		return "Proto return values are disabled on this executor"
-	end
+	local list = debug.getproto(test, 1, true)
+	assert(type(list) == "table" and type(list[1]) == "function", "getproto did not return the inner closure")
+	assert(list[1]() == "UNC_PROTO_1", "getproto returned a non-functional closure")
+	local raw = debug.getproto(test, 1, false)
+	assert(type(raw) == "function", "getproto(..., false) did not return a function")
 end)
 
 test("debug.getprotos", {}, function()
 	local function test()
-		local function _1()
-			return true
-		end
-		local function _2()
-			return true
-		end
-		local function _3()
-			return true
-		end
+		local function _1() return "UNC_PROTO_1" end
+		local function _2() return "UNC_PROTO_2" end
+		local function _3() return "UNC_PROTO_3" end
 	end
-	for i in ipairs(debug.getprotos(test)) do
+	local protos = debug.getprotos(test)
+	assert(type(protos) == "table" and #protos >= 3, "getprotos did not expose all nested prototypes")
+	local seen = {}
+	for i = 1, 3 do
 		local proto = debug.getproto(test, i, true)[1]
-		local realproto = debug.getproto(test, i)
-		assert(proto(), "Failed to get inner function " .. i)
-		if not realproto() then
-			return "Proto return values are disabled on this executor"
-		end
+		assert(type(proto) == "function", "getprotos/getproto returned a non-function at index " .. i)
+		seen[proto()] = true
 	end
+	assert(seen.UNC_PROTO_1 and seen.UNC_PROTO_2 and seen.UNC_PROTO_3, "getprotos did not expose the expected distinct prototypes")
 end)
 
 test("debug.getstack", {}, function()
-	local _ = "a" .. "b"
-	assert(debug.getstack(1, 1) == "ab", "The first item in the stack should be 'ab'")
-	assert(debug.getstack(1)[1] == "ab", "The first item in the stack table should be 'ab'")
+	local function target()
+		local first = "UNC_STACK_A"
+		local second = "UNC_STACK_B"
+		local all = debug.getstack(1)
+		assert(type(all) == "table", "getstack(level) did not return a table")
+		local foundFirst, foundSecond = false, false
+		for _, value in pairs(all) do
+			if value == first then foundFirst = true end
+			if value == second then foundSecond = true end
+		end
+		assert(foundFirst and foundSecond, "getstack(level) did not expose the active local variables")
+	end
+	target()
 end)
 
 test("debug.getupvalue", {}, function()
@@ -495,7 +498,24 @@ test("isrbxactive", {"isgameactive"}, function()
 	assert(type(isrbxactive()) == "boolean", "Did not return a boolean value")
 end)
 
-test("mouse1click", {}, nil, "No standard UNC state getter exists for automatic verification")
+test("mouse1click", {}, function()
+	local gui = Instance.new("ScreenGui")
+	gui.Parent = gethui()
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.fromOffset(120, 60)
+	button.Position = UDim2.fromOffset(100, 100)
+	button.Text = "UNC_MOUSE_CLICK"
+	button.Parent = gui
+	local clicked = false
+	button.MouseButton1Click:Connect(function() clicked = true end)
+	task.wait()
+	mousemoveabs(button.AbsolutePosition.X + button.AbsoluteSize.X / 2, button.AbsolutePosition.Y + button.AbsoluteSize.Y / 2)
+	task.wait()
+	mouse1click()
+	task.wait()
+	button:Destroy(); gui:Destroy()
+	assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
+end)
 
 test("mouse1press", {}, nil, "No standard UNC state getter exists for automatic verification")
 
@@ -511,7 +531,23 @@ test("mousemoveabs", {}, nil, "No standard UNC state getter exists for automatic
 
 test("mousemoverel", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mousescroll", {}, nil, "No standard UNC state getter exists for automatic verification")
+test("mousescroll", {}, function()
+	local gui = Instance.new("ScreenGui")
+	gui.Parent = gethui()
+	local frame = Instance.new("ScrollingFrame")
+	frame.Size = UDim2.fromOffset(200, 100)
+	frame.Position = UDim2.fromOffset(100, 100)
+	frame.CanvasSize = UDim2.fromOffset(200, 1000)
+	frame.Parent = gui
+	task.wait()
+	mousemoveabs(frame.AbsolutePosition.X + frame.AbsoluteSize.X / 2, frame.AbsolutePosition.Y + frame.AbsoluteSize.Y / 2)
+	local before = frame.CanvasPosition.Y
+	mousescroll(-5)
+	task.wait()
+	local after = frame.CanvasPosition.Y
+	frame:Destroy(); gui:Destroy()
+	assert(after > before, "mousescroll did not change the hovered ScrollingFrame position")
+end)
 
 test("fireclickdetector", {}, function()
 	local part=Instance.new("Part",workspace); local detector=Instance.new("ClickDetector",part); local fired=false
@@ -561,7 +597,11 @@ test("sethiddenproperty", {}, function()
 	assert(gethiddenproperty(fire, "size_xml") == 10, "Did not set the hidden property")
 end)
 
-test("gethui", {}, nil, "No portable oracle for hidden UI container identity")
+test("gethui", {}, function()
+	local ui = gethui()
+	assert(typeof(ui) == "Instance", "gethui did not return an Instance")
+	assert(ui:IsDescendantOf(game:GetService("CoreGui")), "gethui result is not inside CoreGui")
+end)
 
 test("getinstances", {}, function()
 	local marker=Instance.new("Folder"); local found=false
@@ -593,9 +633,9 @@ end)
 test("setrbxclipboard", {}, nil, "No standard UNC clipboard getter exists for automatic round-trip")
 
 test("getrawmetatable", {}, function()
-	local metatable = { __metatable = "Locked!" }
-	local object = setmetatable({}, metatable)
-	assert(getrawmetatable(object) == metatable, "Did not return the metatable")
+	local metatable = getrawmetatable(game)
+	assert(type(metatable) == "table", "getrawmetatable(game) did not return a table")
+	assert(type(metatable.__namecall) == "function", "game raw metatable has no __namecall function")
 end)
 
 test("hookmetamethod", {}, function()
@@ -635,16 +675,29 @@ test("setrawmetatable", {}, function()
 end)
 
 test("setreadonly", {}, function()
-	local object = { success = false }
-	table.freeze(object)
-	setreadonly(object, false)
-	object.success = true
-	assert(object.success, "Did not allow the table to be modified")
+	local mt = getrawmetatable(game)
+	assert(type(mt) == "table", "Could not obtain game raw metatable")
+	local oldReadonly = isreadonly(mt)
+	setreadonly(mt, false)
+	local oldNamecall = mt.__namecall
+	local marker = "__UNC_SETREADONLY_TEST__"
+	mt.__namecall = newcclosure(function(...)
+		return marker
+	end)
+	local result = game:GetService("Lighting")
+	mt.__namecall = oldNamecall
+	setreadonly(mt, oldReadonly)
+	assert(result == marker, "setreadonly did not permit changing game.__namecall")
 end)
 
 -- Miscellaneous
 
-test("identifyexecutor", {"getexecutorname"}, nil, "Executor identity has no independent portable oracle")
+test("identifyexecutor", {"getexecutorname"}, function()
+	local name, version = identifyexecutor()
+	assert(type(name) == "string" and #name > 0, "identifyexecutor did not return a non-empty executor name")
+	if version ~= nil then assert(type(version) == "string", "identifyexecutor version was not a string") end
+	print("identifyexecutor:", name, version or "(no version)")
+end)
 
 test("lz4compress", {}, function()
 	local raw = "Hello, world!"
