@@ -1,5 +1,4 @@
 local passes, fails, undefined = 0, 0, 0
-local running = 0
 
 local function getGlobal(path)
 	local value = getfenv(0)
@@ -14,64 +13,44 @@ local function getGlobal(path)
 end
 
 local function test(name, aliases, callback)
-	running += 1
+	if not callback then
+		fails += 1
+		warn("⛔ " .. name .. " (no behavioural test)")
+		return
+	end
 
-	task.spawn(function()
-		if not getGlobal(name) then
-			fails += 1
-			warn("⛔ " .. name .. " (missing)")
-		elseif not callback then
-			fails += 1
-			warn("⛔ " .. name .. " (no behavioural test)")
+	if not getGlobal(name) then
+		fails += 1
+		warn("⛔ " .. name .. " (missing)")
+	else
+		local success, message = pcall(callback)
+
+		if success then
+			passes += 1
+			print("✅ " .. name .. (message and " • " .. message or ""))
 		else
-			local success, message = pcall(callback)
-	
-			if success then
-				passes += 1
-				print("✅ " .. name .. (message and " • " .. message or ""))
-			else
-				fails += 1
-				warn("⛔ " .. name .. " failed: " .. message)
-			end
+			fails += 1
+			warn("⛔ " .. name .. " failed: " .. tostring(message))
 		end
-	
-		local undefinedAliases = {}
-	
-		for _, alias in ipairs(aliases) do
-			if getGlobal(alias) == nil then
-				table.insert(undefinedAliases, alias)
-			end
-		end
-	
-		if #undefinedAliases > 0 then
-			undefined += 1
-			warn("⚠️ " .. table.concat(undefinedAliases, ", "))
-		end
+	end
 
-		running -= 1
-	end)
+	local undefinedAliases = {}
+
+	for _, alias in ipairs(aliases) do
+		if getGlobal(alias) == nil then
+			table.insert(undefinedAliases, alias)
+		end
+	end
+
+	if #undefinedAliases > 0 then
+		undefined += 1
+		warn("⚠️ " .. table.concat(undefinedAliases, ", "))
+	end
 end
 
--- Header and summary
-
 print("\n")
-
 print("UNC Environment Check")
-print("✅ - Pass, ⛔ - Fail, ⏺️ - No test, ⚠️ - Missing aliases\n")
-
-task.defer(function()
-	repeat task.wait() until running == 0
-
-	local rate = (passes + fails) > 0 and math.round(passes / (passes + fails) * 100) or 0
-	local outOf = passes .. " out of " .. (passes + fails)
-
-	print("\n")
-
-	print("UNC Summary")
-	print("✅ Tested with a " .. rate .. "% success rate (" .. outOf .. ")")
-	print("⛔ " .. fails .. " tests failed")
-	print("⚠️ " .. undefined .. " globals are missing aliases")
-end)
+print("✅ - Pass, ⛔ - Fail, ⚠️ - Missing aliases\n")
 
 -- Cache
 
@@ -903,3 +882,11 @@ test("WebSocket.connect", {}, function()
 	ws:Close()
 	assert(received == token, "WebSocket echo did not return the sent payload")
 end)
+
+
+print("\n")
+print("UNC Summary")
+local rate = (passes + fails) > 0 and math.round(passes / (passes + fails) * 100) or 0
+print("✅ Tested with a " .. rate .. "% success rate (" .. passes .. " out of " .. (passes + fails) .. ")")
+print("⛔ " .. fails .. " tests failed")
+print("⚠️ " .. undefined .. " globals are missing aliases")
