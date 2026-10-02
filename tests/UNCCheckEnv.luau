@@ -58,7 +58,18 @@ local function exists(name: string)
 end
 
 local function testExists(name: string)
-    record(name, exists(name))
+    local value = resolve(name)
+    if value == nil then
+        missing += 1
+        warn("⚠️ " .. name .. " is missing")
+        return
+    end
+    record(name, true, "present")
+end
+
+local function assertCallable(name: string)
+    local value = resolve(name)
+    assert(type(value) == "function", name .. " exists but is not callable (type=" .. type(value) .. ")")
 end
 
 local function assertType(value: any, expected: string, label: string)
@@ -137,7 +148,7 @@ if exists("loadstring") then
         assert(fn ~= nil, tostring(err))
         assert(fn(41) == 42, "compiled function returned an unexpected value")
 
-        local badFn, badErr = loadstring("this is not valid Luau")
+        local badFn, badErr = loadstring("local =")
         assert(badFn == nil and type(badErr) == "string", "compiler errors were not reported")
     end)
 end
@@ -275,13 +286,14 @@ end
 if exists("writefile") and exists("readfile") and exists("isfile") then
     test("filesystem read/write", function()
         local path = ".unc_test_io.txt"
-        writefile(path, "UNC")
-        assert(isfile(path), "test file was not created")
-        assert(readfile(path) == "UNC", "readfile returned unexpected contents")
-        if exists("delfile") then
+        if isfile(path) then
             delfile(path)
-            assert(not isfile(path), "test file was not deleted")
         end
+        writefile(path, "UNC")
+        assert(isfile(path), "writefile did not create a file")
+        assert(readfile(path) == "UNC", "readfile returned unexpected contents")
+        delfile(path)
+        assert(not isfile(path), "delfile did not remove the file")
     end)
 end
 
@@ -292,9 +304,9 @@ if exists("makefolder") and exists("isfolder") and exists("delfolder") then
             delfolder(path)
         end
         makefolder(path)
-        assert(isfolder(path), "folder was not created")
+        assert(isfolder(path), "makefolder did not create the folder")
         delfolder(path)
-        assert(not isfolder(path), "folder was not deleted")
+        assert(not isfolder(path), "delfolder did not remove the folder")
     end)
 end
 
@@ -340,20 +352,29 @@ end
 
 if exists("getcallbackvalue") then
     test("getcallbackvalue", function()
+        assertCallable("getcallbackvalue")
         local bindable = Instance.new("BindableFunction")
         local callback = function() end
         bindable.OnInvoke = callback
-        assert(getcallbackvalue(bindable, "OnInvoke") == callback, "callback value mismatch")
+        local returned = getcallbackvalue(bindable, "OnInvoke")
+        assert(returned == callback, "callback value mismatch")
     end)
 end
 
 if exists("getconnections") then
     test("getconnections", function()
+        assertCallable("getconnections")
         local event = Instance.new("BindableEvent")
         local connection = event.Event:Connect(function() end)
         local connections = getconnections(event.Event)
         assert(type(connections) == "table" and #connections > 0, "no connections returned")
-        assert(type(connections[1].Disconnect) == "function", "connection lacks Disconnect")
+        local first = connections[1]
+        for _, key in ipairs({"Enabled", "Function", "Disconnect", "Fire"}) do
+            assert(first[key] ~= nil, "connection is missing " .. key)
+        end
+        assert(type(first.Function) == "function", "connection.Function is not a function")
+        assert(type(first.Disconnect) == "function", "connection.Disconnect is not a function")
+        assert(type(first.Fire) == "function", "connection.Fire is not a function")
         connection:Disconnect()
     end)
 end
@@ -391,12 +412,15 @@ end
 
 if exists("isreadonly") and exists("setreadonly") then
     test("readonly table", function()
+        assertCallable("isreadonly")
+        assertCallable("setreadonly")
         local object = { value = false }
         table.freeze(object)
         assert(isreadonly(object) == true, "frozen table is not readonly")
         setreadonly(object, false)
+        assert(isreadonly(object) == false, "setreadonly(false) did not make table writable")
         object.value = true
-        assert(object.value == true, "readonly state was not changed")
+        assert(object.value == true, "readonly table remained immutable")
     end)
 end
 
@@ -426,21 +450,88 @@ end
 
 if exists("lz4compress") and exists("lz4decompress") then
     test("lz4 round-trip", function()
+        assertCallable("lz4compress")
+        assertCallable("lz4decompress")
         local source = "UNC compression test"
         local compressed = lz4compress(source)
         assertType(compressed, "string", "compressed data")
-        assert(lz4decompress(compressed, #source) == source, "LZ4 round-trip failed")
+        local restored = lz4decompress(compressed, #source)
+        assert(restored == source, "LZ4 round-trip failed")
     end)
 end
 
 if exists("request") then
     test("request", function()
+        assertCallable("request")
         local response = request({
-            Url = "https://httpbin.org/status/204",
+            Url = "https://httpbin.org/user-agent",
             Method = "GET",
         })
         assert(type(response) == "table", "request did not return a table")
-        assert(type(response.StatusCode) == "number", "StatusCode is not a number")
+        assert(tonumber(response.StatusCode) == 200, "request did not return HTTP 200")
+        assert(type(response.Body) == "string" and #response.Body > 0, "request returned no response body")
+        assert(type(response.Headers) == "table", "request returned no headers table")
+    end)
+end
+
+-- Reality checks: APIs that cannot be validated by existence alone.
+
+if exists("messagebox") then
+    test("messagebox reality", function()
+        assertCallable("messagebox")
+        local done = false
+        local result = nil
+        task.spawn(function()
+            local ok, value = pcall(messagebox, "UNC REALITY TEST\\nClick OK to prove this is a real message box.", "UNC Compatibility Test", 0)
+            done = true
+            if ok then
+                result = value
+            else
+                result = "ERROR: " .. tostring(value)
+            end
+        end)
+
+        local deadline = os.clock() + 10
+        while not done and os.clock() < deadline do
+            task.wait()
+        end
+
+        assert(done, "messagebox did not return within 10 seconds; if a dialog appeared, click OK and rerun")
+        assert(type(result) == "number" or type(result) == "string", "messagebox returned an invalid result: " .. type(result))
+        return "returned " .. tostring(result)
+    end)
+end
+
+if exists("setfpscap") then
+    test("setfpscap reality", function()
+        assertCallable("setfpscap")
+        local runService = game:GetService("RunService")
+        local heartbeat = runService.Heartbeat
+
+        local function measure(seconds: number): number
+            local frames = 0
+            local started = os.clock()
+            while os.clock() - started < seconds do
+                heartbeat:Wait()
+                frames += 1
+            end
+            return frames / math.max(os.clock() - started, 0.001)
+        end
+
+        local oldCap = nil
+        if exists("getfpscap") and type(getfpscap) == "function" then
+            oldCap = getfpscap()
+        end
+
+        setfpscap(30)
+        local capped = measure(2)
+        setfpscap(oldCap or 0)
+
+        local uncapped = measure(1)
+        assert(capped >= 15 and capped <= 45, ("30 FPS cap was not observed; measured %.1f FPS"):format(capped))
+        assert(uncapped > 0, "Heartbeat produced no samples")
+
+        return ("Heartbeat %.1f FPS @ cap 30; %.1f FPS after restore"):format(capped, uncapped)
     end)
 end
 
@@ -516,12 +607,15 @@ end
 
 if exists("Drawing.new") then
     test("Drawing.new", function()
+        assert(type(Drawing) == "table" or type(Drawing) == "userdata", "Drawing exists but is not an object")
+        assertCallable("Drawing.new")
         local object = Drawing.new("Square")
-        object.Visible = false
+        assert(object ~= nil, "Drawing.new returned nil")
         assert(type(object) == "userdata" or type(object) == "table", "Drawing.new returned an invalid object")
-        if object.Destroy then
-            object:Destroy()
-        end
+        object.Visible = false
+        assert(pcall(function() object.Visible = true end), "Drawing object properties are not writable")
+        local destroyed = pcall(function() object:Destroy() end)
+        assert(destroyed, "Drawing:Destroy() threw an error")
     end)
 end
 
@@ -545,10 +639,14 @@ end
 
 if exists("WebSocket.connect") then
     test("WebSocket.connect", function()
-        local ws = WebSocket.connect("ws://echo.websocket.events")
+        assertCallable("WebSocket.connect")
+        local ws = WebSocket.connect("wss://echo.websocket.events")
         assert(ws ~= nil, "WebSocket.connect returned nil")
+        assert(type(ws) == "table" or type(ws) == "userdata", "WebSocket.connect returned an invalid object")
         assert(type(ws.Send) == "function", "WebSocket.Send is missing")
         assert(type(ws.Close) == "function", "WebSocket.Close is missing")
+        assert(ws.OnMessage ~= nil, "WebSocket.OnMessage is missing")
+        assert(ws.OnClose ~= nil, "WebSocket.OnClose is missing")
         ws:Close()
     end)
 end
