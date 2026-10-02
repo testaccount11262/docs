@@ -587,9 +587,28 @@ if exists("getrunningscripts") then
     end)
 end
 
-if exists("getthreadidentity") then
-    test("getthreadidentity", function()
-        assertType(getthreadidentity(), "number", "thread identity")
+if exists("getthreadidentity") and exists("setthreadidentity") then
+    test("thread identity / CoreGui", function()
+        assertCallable("getthreadidentity")
+        assertCallable("setthreadidentity")
+
+        local original = getthreadidentity()
+        assertType(original, "number", "original thread identity")
+
+        local ok, err = pcall(function()
+            setthreadidentity(2)
+            assert(getthreadidentity() == 2, "setthreadidentity(2) did not set identity 2")
+
+            local coreGui = game:GetService("CoreGui")
+            assert(coreGui ~= nil, "CoreGui could not be obtained at identity 2")
+            assert(coreGui.Parent == game, "CoreGui.Parent is not game")
+        end)
+
+        local restoreOk, restoreErr = pcall(function()
+            setthreadidentity(original)
+        end)
+        assert(restoreOk, "failed to restore original thread identity: " .. tostring(restoreErr))
+        assert(ok, tostring(err))
     end)
 end
 
@@ -610,23 +629,73 @@ if exists("Drawing.new") then
     test("Drawing.new", function()
         assert(type(Drawing) == "table" or type(Drawing) == "userdata", "Drawing exists but is not an object")
         assertCallable("Drawing.new")
+
         local object = Drawing.new("Square")
         assert(object ~= nil, "Drawing.new returned nil")
         assert(type(object) == "userdata" or type(object) == "table", "Drawing.new returned an invalid object")
+
         object.Visible = false
-        assert(pcall(function() object.Visible = true end), "Drawing object properties are not writable")
-        local destroyed = pcall(function() object:Destroy() end)
-        assert(destroyed, "Drawing:Destroy() threw an error")
+        object.Size = Vector2.new(32, 32)
+        object.Position = Vector2.new(100, 100)
+        assert(object.Visible == false, "Visible property did not retain its value")
+        assert(object.Size.X == 32 and object.Size.Y == 32, "Size property did not retain its value")
+        assert(object.Position.X == 100 and object.Position.Y == 100, "Position property did not retain its value")
+
+        object.Visible = true
+        assert(object.Visible == true, "Visible property could not be enabled")
+
+        assert(type(object.Destroy) == "function", "Drawing object has no Destroy method")
+        assert(pcall(function() object:Destroy() end), "Drawing:Destroy() threw an error")
+    end)
+end
+
+if exists("isrenderobj") and exists("Drawing.new") then
+    test("isrenderobj behaviour", function()
+        assertCallable("isrenderobj")
+        local object = Drawing.new("Square")
+        assert(isrenderobj(object) == true, "Drawing object was not recognized as a render object")
+        assert(isrenderobj({}) == false, "ordinary table was incorrectly recognized as a render object")
+        object:Destroy()
+    end)
+end
+
+if exists("getrenderproperty") and exists("setrenderproperty") and exists("Drawing.new") then
+    test("render property access", function()
+        assertCallable("getrenderproperty")
+        assertCallable("setrenderproperty")
+        local object = Drawing.new("Square")
+
+        setrenderproperty(object, "Visible", false)
+        assert(getrenderproperty(object, "Visible") == false, "getrenderproperty returned the wrong value")
+
+        setrenderproperty(object, "Visible", true)
+        assert(getrenderproperty(object, "Visible") == true, "setrenderproperty did not update the property")
+
+        object:Destroy()
+    end)
+end
+
+if exists("cleardrawcache") then
+    test("cleardrawcache behaviour", function()
+        assertCallable("cleardrawcache")
+        local object = nil
+        if exists("Drawing.new") then
+            object = Drawing.new("Square")
+            object.Visible = true
+        end
+        assert(pcall(cleardrawcache), "cleardrawcache threw an error")
+        if object ~= nil then
+            assert(pcall(function() object:Destroy() end), "Drawing object could not be destroyed after cleardrawcache")
+        end
     end)
 end
 
 if exists("Drawing.Fonts") then
     test("Drawing.Fonts", function()
         assert(type(Drawing.Fonts) == "table", "Drawing.Fonts is not a table")
-        assert(Drawing.Fonts.UI ~= nil, "UI font is missing")
-        assert(Drawing.Fonts.System ~= nil, "System font is missing")
-        assert(Drawing.Fonts.Plex ~= nil, "Plex font is missing")
-        assert(Drawing.Fonts.Monospace ~= nil, "Monospace font is missing")
+        for _, name in ipairs({"UI", "System", "Plex", "Monospace"}) do
+            assert(Drawing.Fonts[name] ~= nil, name .. " font is missing")
+        end
     end)
 end
 
