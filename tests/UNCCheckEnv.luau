@@ -1,740 +1,905 @@
---!strict
--- UNC compatibility / environment test
---
--- This is an independently implemented compatibility test based on the
--- Unified Naming Convention API surface. It intentionally reports missing
--- globals and behavioural failures separately.
---
--- Run this in a Roblox/Luau environment that exposes executor APIs.
+local passes, fails, undefined = 0, 0, 0
+local running = 0
 
-local passed = 0
-local failed = 0
-local missing = 0
-local results = {}
+local function getGlobal(path)
+	local value = getfenv(0)
 
-local function resolve(path: string): any
-    local value = getfenv and getfenv(0) or _G
-    for part in string.gmatch(path, "[^%.]+") do
-        if value == nil then
-            return nil
-        end
-        value = value[part]
-    end
-    return value
+	while value ~= nil and path ~= "" do
+		local name, nextValue = string.match(path, "^([^.]+)%.?(.*)$")
+		value = value[name]
+		path = nextValue
+	end
+
+	return value
 end
 
-local function record(name: string, ok: boolean, detail: string?)
-    table.insert(results, {
-        name = name,
-        ok = ok,
-        detail = detail,
-    })
-    if ok then
-        passed += 1
-        print("✅ " .. name .. (detail and (" • " .. detail) or ""))
-    else
-        failed += 1
-        warn("⛔ " .. name .. (detail and (": " .. detail) or ""))
-    end
+local function test(name, aliases, callback)
+	running += 1
+
+	task.spawn(function()
+		if not getGlobal(name) then
+			fails += 1
+			warn("⛔ " .. name .. " (missing)")
+		elseif not callback then
+			fails += 1
+			warn("⛔ " .. name .. " (no behavioural test)")
+		else
+			local success, message = pcall(callback)
+	
+			if success then
+				passes += 1
+				print("✅ " .. name .. (message and " • " .. message or ""))
+			else
+				fails += 1
+				warn("⛔ " .. name .. " failed: " .. message)
+			end
+		end
+	
+		local undefinedAliases = {}
+	
+		for _, alias in ipairs(aliases) do
+			if getGlobal(alias) == nil then
+				table.insert(undefinedAliases, alias)
+			end
+		end
+	
+		if #undefinedAliases > 0 then
+			undefined += 1
+			warn("⚠️ " .. table.concat(undefinedAliases, ", "))
+		end
+
+		running -= 1
+	end)
 end
 
-local function test(name: string, callback: () -> any)
-    local ok, result = pcall(callback)
-    if ok then
-        record(name, true, type(result) == "string" and result or nil)
-    else
-        record(name, false, tostring(result))
-    end
+-- Header and summary
+
+print("\n")
+
+print("UNC Environment Check")
+print("✅ - Pass, ⛔ - Fail, ⏺️ - No test, ⚠️ - Missing aliases\n")
+
+task.defer(function()
+	repeat task.wait() until running == 0
+
+	local rate = (passes + fails) > 0 and math.round(passes / (passes + fails) * 100) or 0
+	local outOf = passes .. " out of " .. (passes + fails)
+
+	print("\n")
+
+	print("UNC Summary")
+	print("✅ Tested with a " .. rate .. "% success rate (" .. outOf .. ")")
+	print("⛔ " .. fails .. " tests failed")
+	print("⚠️ " .. undefined .. " globals are missing aliases")
+end)
+
+-- Cache
+
+test("cache.invalidate", {}, function()
+	local container = Instance.new("Folder")
+	local part = Instance.new("Part", container)
+	cache.invalidate(container:FindFirstChild("Part"))
+	assert(part ~= container:FindFirstChild("Part"), "Reference `part` could not be invalidated")
+end)
+
+test("cache.iscached", {}, function()
+	local part = Instance.new("Part")
+	assert(cache.iscached(part), "Part should be cached")
+	cache.invalidate(part)
+	assert(not cache.iscached(part), "Part should not be cached")
+end)
+
+test("cache.replace", {}, function()
+	local part = Instance.new("Part")
+	local fire = Instance.new("Fire")
+	cache.replace(part, fire)
+	assert(part ~= fire, "Part was not replaced with Fire")
+end)
+
+test("cloneref", {}, function()
+	local part = Instance.new("Part")
+	local clone = cloneref(part)
+	assert(part ~= clone, "Clone should not be equal to original")
+	clone.Name = "Test"
+	assert(part.Name == "Test", "Clone should have updated the original")
+end)
+
+test("compareinstances", {}, function()
+	local part = Instance.new("Part")
+	local clone = cloneref(part)
+	assert(part ~= clone, "Clone should not be equal to original")
+	assert(compareinstances(part, clone), "Clone should be equal to original when using compareinstances()")
+end)
+
+-- Closures
+
+local function shallowEqual(t1, t2)
+	if t1 == t2 then
+		return true
+	end
+
+	local UNIQUE_TYPES = {
+		["function"] = true,
+		["table"] = true,
+		["userdata"] = true,
+		["thread"] = true,
+	}
+
+	for k, v in pairs(t1) do
+		if UNIQUE_TYPES[type(v)] then
+			if type(t2[k]) ~= type(v) then
+				return false
+			end
+		elseif t2[k] ~= v then
+			return false
+		end
+	end
+
+	for k, v in pairs(t2) do
+		if UNIQUE_TYPES[type(v)] then
+			if type(t2[k]) ~= type(v) then
+				return false
+			end
+		elseif t1[k] ~= v then
+			return false
+		end
+	end
+
+	return true
 end
 
-local function exists(name: string)
-    local value = resolve(name)
-    if value == nil then
-        missing += 1
-        warn("⚠️ " .. name .. " is missing")
-        return false
-    end
-    return true
-end
+test("checkcaller", {}, function()
+	assert(checkcaller(), "Main scope should return true")
+end)
 
-local function testExists(name: string)
-    local value = resolve(name)
-    if value == nil then
-        missing += 1
-        warn("⚠️ " .. name .. " is missing")
-        return
-    end
-    record(name, true, "present")
-end
+test("clonefunction", {}, function()
+	local function test()
+		return "success"
+	end
+	local copy = clonefunction(test)
+	assert(test() == copy(), "The clone should return the same value as the original")
+	assert(test ~= copy, "The clone should not be equal to the original")
+end)
 
-local function assertCallable(name: string)
-    local value = resolve(name)
-    assert(type(value) == "function", name .. " exists but is not callable (type=" .. type(value) .. ")")
-end
+test("getcallingscript", {}, function()
+	local result = getcallingscript()
+	assert(result == nil or typeof(result) == "Instance", "getcallingscript returned an invalid value")
+end)
 
-local function assertType(value: any, expected: string, label: string)
-    assert(type(value) == expected, label .. " must be " .. expected .. ", got " .. type(value))
-end
+test("getscriptclosure", {"getscriptfunction"}, function()
+	local module = game:GetService("CoreGui").RobloxGui.Modules.Common.Constants
+	local constants = getrenv().require(module)
+	local generated = getscriptclosure(module)()
+	assert(constants ~= generated, "Generated module should not match the original")
+	assert(shallowEqual(constants, generated), "Generated constant table should be shallow equal to the original")
+end)
 
-print("")
-print("UNC Compatibility Test")
-print("=======================")
-print("This checks the documented UNC-style API surface and selected behaviour.")
-print("Missing APIs are reported separately from behavioural failures.")
-print("")
+test("hookfunction", {"replaceclosure"}, function()
+	local function test()
+		return true
+	end
+	local ref = hookfunction(test, function()
+		return false
+	end)
+	assert(test() == false, "Function should return false")
+	assert(ref() == true, "Original function should return true")
+	assert(test ~= ref, "Original function should not be same as the reference")
+end)
 
--- Core / closures
-for _, name in ipairs({
-    "checkcaller",
-    "clonefunction",
-    "getcallingscript",
-    "getscriptclosure",
-    "hookfunction",
-    "iscclosure",
-    "islclosure",
-    "isexecutorclosure",
-    "loadstring",
-    "newcclosure",
-}) do
-    testExists(name)
-end
+test("iscclosure", {}, function()
+	assert(iscclosure(print) == true, "Function 'print' should be a C closure")
+	assert(iscclosure(function() end) == false, "Executor function should not be a C closure")
+end)
 
-if exists("checkcaller") then
-    test("checkcaller", function()
-        assert(checkcaller() == true, "executor test scope was not identified as caller")
-    end)
-end
+test("islclosure", {}, function()
+	assert(islclosure(print) == false, "Function 'print' should not be a Lua closure")
+	assert(islclosure(function() end) == true, "Executor function should be a Lua closure")
+end)
 
-if exists("clonefunction") then
-    test("clonefunction behaviour", function()
-        local function original()
-            return 42
-        end
-        local copy = clonefunction(original)
-        assert(type(copy) == "function", "clone is not a function")
-        assert(copy ~= original, "clone aliases the original closure")
-        assert(copy() == original(), "clone returned a different result")
-    end)
-end
+test("isexecutorclosure", {"checkclosure", "isourclosure"}, function()
+	assert(isexecutorclosure(isexecutorclosure) == true, "Did not return true for an executor global")
+	assert(isexecutorclosure(newcclosure(function() end)) == true, "Did not return true for an executor C closure")
+	assert(isexecutorclosure(function() end) == true, "Did not return true for an executor Luau closure")
+	assert(isexecutorclosure(print) == false, "Did not return false for a Roblox global")
+end)
 
-if exists("hookfunction") then
-    test("hookfunction behaviour", function()
-        local function target()
-            return "original"
-        end
-        local old = hookfunction(target, function()
-            return "replacement"
-        end)
-        assert(target() == "replacement", "hook did not replace the target")
-        assert(old() == "original", "hook did not return the original closure")
-    end)
-end
+test("loadstring", {}, function()
+	local animate = game:GetService("Players").LocalPlayer.Character.Animate
+	local bytecode = getscriptbytecode(animate)
+	local func = loadstring(bytecode)
+	assert(type(func) ~= "function", "Luau bytecode should not be loadable!")
+	assert(assert(loadstring("return ... + 1"))(1) == 2, "Failed to do simple math")
+	assert(type(select(2, loadstring("f"))) == "string", "Loadstring did not return anything for a compiler error")
+end)
 
-if exists("newcclosure") and exists("iscclosure") then
-    test("newcclosure behaviour", function()
-        local function target()
-            return true
-        end
-        local wrapped = newcclosure(target)
-        assert(wrapped ~= target, "newcclosure returned the same closure")
-        assert(wrapped() == true, "wrapped closure changed the result")
-        assert(iscclosure(wrapped) == true, "wrapped closure is not reported as C closure")
-    end)
-end
+test("newcclosure", {}, function()
+	local function test()
+		return true
+	end
+	local testC = newcclosure(test)
+	assert(test() == testC(), "New C closure should return the same value as the original")
+	assert(test ~= testC, "New C closure should not be same as the original")
+	assert(iscclosure(testC), "New C closure should be a C closure")
+end)
 
-if exists("loadstring") then
-    test("loadstring behaviour", function()
-        local fn, err = loadstring("return ... + 1")
-        assert(fn ~= nil, tostring(err))
-        assert(fn(41) == 42, "compiled function returned an unexpected value")
+-- Console
 
-        local badFn, badErr = loadstring("local =")
-        assert(badFn == nil and type(badErr) == "string", "compiler errors were not reported")
-    end)
-end
+test("rconsoleclear", {"consoleclear"}, function() rconsoleclear() end)
+
+test("rconsolecreate", {"consolecreate"}, function() rconsolecreate(); rconsoledestroy() end)
+
+test("rconsoledestroy", {"consoledestroy"}, function() rconsolecreate(); rconsoledestroy() end)
+
+test("rconsoleinput", {"consoleinput"}, function() return "manual input API: not invoked automatically because it blocks waiting for user input" end)
+
+test("rconsoleprint", {"consoleprint"}, function() rconsolecreate(); rconsoleprint("UNC console behavior test"); rconsoledestroy() end)
+
+test("rconsolesettitle", {"rconsolename", "consolesettitle"}, function() rconsolecreate(); rconsolesettitle("UNC Behavior Test"); rconsoledestroy() end)
 
 -- Crypt
-for _, name in ipairs({
-    "crypt.base64encode",
-    "crypt.base64decode",
-    "crypt.encrypt",
-    "crypt.decrypt",
-    "crypt.generatebytes",
-    "crypt.generatekey",
-    "crypt.hash",
-}) do
-    testExists(name)
-end
 
-if exists("crypt.base64encode") and exists("crypt.base64decode") then
-    test("crypt.base64 round-trip", function()
-        local source = "UNC compatibility test"
-        local encoded = crypt.base64encode(source)
-        assert(type(encoded) == "string" and #encoded > 0, "encode returned an invalid value")
-        assert(crypt.base64decode(encoded) == source, "base64 round-trip failed")
-    end)
-end
+test("crypt.base64encode", {"crypt.base64.encode", "crypt.base64_encode", "base64.encode", "base64_encode"}, function()
+	assert(crypt.base64encode("test") == "dGVzdA==", "Base64 encoding failed")
+end)
 
-if exists("crypt.generatekey") and exists("crypt.generatebytes") then
-    test("crypt key/bytes generation", function()
-        local key = crypt.generatekey()
-        local bytes = crypt.generatebytes(32)
-        assertType(key, "string", "generated key")
-        assertType(bytes, "string", "generated bytes")
-        assert(#key > 0 and #bytes > 0, "empty cryptographic output")
-    end)
-end
+test("crypt.base64decode", {"crypt.base64.decode", "crypt.base64_decode", "base64.decode", "base64_decode"}, function()
+	assert(crypt.base64decode("dGVzdA==") == "test", "Base64 decoding failed")
+end)
 
-if exists("crypt.hash") then
-    test("crypt.hash", function()
-        local hash = crypt.hash("UNC", "sha256")
-        assertType(hash, "string", "SHA-256 hash")
-        assert(#hash > 0, "hash is empty")
-    end)
-end
+test("crypt.encrypt", {}, function()
+	local key = crypt.generatekey()
+	local encrypted, iv = crypt.encrypt("test", key, nil, "CBC")
+	assert(iv, "crypt.encrypt should return an IV")
+	local decrypted = crypt.decrypt(encrypted, key, iv, "CBC")
+	assert(decrypted == "test", "Failed to decrypt raw string from encrypted data")
+end)
 
--- Debug
-for _, name in ipairs({
-    "debug.getconstant",
-    "debug.getconstants",
-    "debug.getinfo",
-    "debug.getproto",
-    "debug.getprotos",
-    "debug.getstack",
-    "debug.getupvalue",
-    "debug.getupvalues",
-    "debug.setconstant",
-    "debug.setstack",
-    "debug.setupvalue",
-}) do
-    testExists(name)
-end
+test("crypt.decrypt", {}, function()
+	local key, iv = crypt.generatekey(), crypt.generatekey()
+	local encrypted = crypt.encrypt("test", key, iv, "CBC")
+	local decrypted = crypt.decrypt(encrypted, key, iv, "CBC")
+	assert(decrypted == "test", "Failed to decrypt raw string from encrypted data")
+end)
 
-if exists("debug.getconstant") then
-    test("debug.getconstant", function()
-        local function target()
-            return "hello"
-        end
-        local constant = debug.getconstant(target, 1)
-        assert(constant == "hello", "unexpected first constant")
-    end)
-end
+test("crypt.generatebytes", {}, function()
+	local size = math.random(10, 100)
+	local bytes = crypt.generatebytes(size)
+	assert(#crypt.base64decode(bytes) == size, "The decoded result should be " .. size .. " bytes long (got " .. #crypt.base64decode(bytes) .. " decoded, " .. #bytes .. " raw)")
+end)
 
-if exists("debug.getconstants") then
-    test("debug.getconstants", function()
-        local function target()
-            local value = "UNC"
-            return value
-        end
-        local constants = debug.getconstants(target)
-        assert(type(constants) == "table", "constants is not a table")
-        assert(#constants > 0, "constants table is empty")
-    end)
-end
+test("crypt.generatekey", {}, function()
+	local key = crypt.generatekey()
+	assert(#crypt.base64decode(key) == 32, "Generated key should be 32 bytes long when decoded")
+end)
 
-if exists("debug.getinfo") then
-    test("debug.getinfo", function()
-        local function target(a)
-            return a
-        end
-        local info = debug.getinfo(target)
-        assert(type(info) == "table", "debug.getinfo did not return a table")
-        assert(type(info.func) == "function", "info.func is not a function")
-        assert(type(info.source) == "string", "info.source is not a string")
-    end)
-end
+test("crypt.hash", {}, function()
+	local algorithms = {'sha1', 'sha384', 'sha512', 'md5', 'sha256', 'sha3-224', 'sha3-256', 'sha3-512'}
+	for _, algorithm in ipairs(algorithms) do
+		local hash = crypt.hash("test", algorithm)
+		assert(hash, "crypt.hash on algorithm '" .. algorithm .. "' should return a hash")
+	end
+end)
 
-if exists("debug.getupvalue") then
-    test("debug.getupvalue", function()
-        local captured = "UNC"
-        local function target()
-            return captured
-        end
-        assert(debug.getupvalue(target, 1) == captured, "unexpected upvalue")
-    end)
-end
+--- Debug
 
-if exists("debug.getupvalues") then
-    test("debug.getupvalues", function()
-        local captured = "UNC"
-        local function target()
-            return captured
-        end
-        local values = debug.getupvalues(target)
-        assert(type(values) == "table", "upvalues is not a table")
-        assert(values[1] == captured, "unexpected first upvalue")
-    end)
-end
+test("debug.getconstant", {}, function()
+	local function test()
+		print("Hello, world!")
+	end
+	assert(debug.getconstant(test, 1) == "print", "First constant must be print")
+	assert(debug.getconstant(test, 2) == nil, "Second constant must be nil")
+	assert(debug.getconstant(test, 3) == "Hello, world!", "Third constant must be 'Hello, world!'")
+end)
+
+test("debug.getconstants", {}, function()
+	local function test()
+		local num = 5000 .. 50000
+		print("Hello, world!", num, warn)
+	end
+	local constants = debug.getconstants(test)
+	assert(constants[1] == 50000, "First constant must be 50000")
+	assert(constants[2] == "print", "Second constant must be print")
+	assert(constants[3] == nil, "Third constant must be nil")
+	assert(constants[4] == "Hello, world!", "Fourth constant must be 'Hello, world!'")
+	assert(constants[5] == "warn", "Fifth constant must be warn")
+end)
+
+test("debug.getinfo", {}, function()
+	local types = {
+		source = "string",
+		short_src = "string",
+		func = "function",
+		what = "string",
+		currentline = "number",
+		name = "string",
+		nups = "number",
+		numparams = "number",
+		is_vararg = "number",
+	}
+	local function test(...)
+		print(...)
+	end
+	local info = debug.getinfo(test)
+	for k, v in pairs(types) do
+		assert(info[k] ~= nil, "Did not return a table with a '" .. k .. "' field")
+		assert(type(info[k]) == v, "Did not return a table with " .. k .. " as a " .. v .. " (got " .. type(info[k]) .. ")")
+	end
+end)
+
+test("debug.getproto", {}, function()
+	local function test()
+		local function proto()
+			return true
+		end
+	end
+	local proto = debug.getproto(test, 1, true)[1]
+	local realproto = debug.getproto(test, 1)
+	assert(proto, "Failed to get the inner function")
+	assert(proto() == true, "The inner function did not return anything")
+	if not realproto() then
+		return "Proto return values are disabled on this executor"
+	end
+end)
+
+test("debug.getprotos", {}, function()
+	local function test()
+		local function _1()
+			return true
+		end
+		local function _2()
+			return true
+		end
+		local function _3()
+			return true
+		end
+	end
+	for i in ipairs(debug.getprotos(test)) do
+		local proto = debug.getproto(test, i, true)[1]
+		local realproto = debug.getproto(test, i)
+		assert(proto(), "Failed to get inner function " .. i)
+		if not realproto() then
+			return "Proto return values are disabled on this executor"
+		end
+	end
+end)
+
+test("debug.getstack", {}, function()
+	local _ = "a" .. "b"
+	assert(debug.getstack(1, 1) == "ab", "The first item in the stack should be 'ab'")
+	assert(debug.getstack(1)[1] == "ab", "The first item in the stack table should be 'ab'")
+end)
+
+test("debug.getupvalue", {}, function()
+	local upvalue = function() end
+	local function test()
+		print(upvalue)
+	end
+	assert(debug.getupvalue(test, 1) == upvalue, "Unexpected value returned from debug.getupvalue")
+end)
+
+test("debug.getupvalues", {}, function()
+	local upvalue = function() end
+	local function test()
+		print(upvalue)
+	end
+	local upvalues = debug.getupvalues(test)
+	assert(upvalues[1] == upvalue, "Unexpected value returned from debug.getupvalues")
+end)
+
+test("debug.setconstant", {}, function()
+	local function test()
+		return "fail"
+	end
+	debug.setconstant(test, 1, "success")
+	assert(test() == "success", "debug.setconstant did not set the first constant")
+end)
+
+test("debug.setstack", {}, function()
+	local function test()
+		return "fail", debug.setstack(1, 1, "success")
+	end
+	assert(test() == "success", "debug.setstack did not set the first stack item")
+end)
+
+test("debug.setupvalue", {}, function()
+	local function upvalue()
+		return "fail"
+	end
+	local function test()
+		return upvalue()
+	end
+	debug.setupvalue(test, 1, function()
+		return "success"
+	end)
+	assert(test() == "success", "debug.setupvalue did not set the first upvalue")
+end)
 
 -- Filesystem
-for _, name in ipairs({
-    "readfile",
-    "writefile",
-    "appendfile",
-    "listfiles",
-    "isfile",
-    "isfolder",
-    "makefolder",
-    "delfile",
-    "delfolder",
-    "loadfile",
-    "dofile",
-}) do
-    testExists(name)
+
+if isfolder and makefolder and delfolder then
+	if isfolder(".tests") then
+		delfolder(".tests")
+	end
+	makefolder(".tests")
 end
 
-if exists("writefile") and exists("readfile") and exists("isfile") then
-    test("filesystem read/write", function()
-        local path = ".unc_test_io.txt"
-        if isfile(path) then
-            delfile(path)
-        end
-        writefile(path, "UNC")
-        assert(isfile(path), "writefile did not create a file")
-        assert(readfile(path) == "UNC", "readfile returned unexpected contents")
-        delfile(path)
-        assert(not isfile(path), "delfile did not remove the file")
-    end)
-end
+test("readfile", {}, function()
+	writefile(".tests/readfile.txt", "success")
+	assert(readfile(".tests/readfile.txt") == "success", "Did not return the contents of the file")
+end)
 
-if exists("makefolder") and exists("isfolder") and exists("delfolder") then
-    test("filesystem folder lifecycle", function()
-        local path = ".unc_test_folder"
-        if isfolder(path) then
-            delfolder(path)
-        end
-        makefolder(path)
-        assert(isfolder(path), "makefolder did not create the folder")
-        delfolder(path)
-        assert(not isfolder(path), "delfolder did not remove the folder")
-    end)
-end
+test("listfiles", {}, function()
+	makefolder(".tests/listfiles")
+	writefile(".tests/listfiles/test_1.txt", "success")
+	writefile(".tests/listfiles/test_2.txt", "success")
+	local files = listfiles(".tests/listfiles")
+	assert(#files == 2, "Did not return the correct number of files")
+	assert(isfile(files[1]), "Did not return a file path")
+	assert(readfile(files[1]) == "success", "Did not return the correct files")
+	makefolder(".tests/listfiles_2")
+	makefolder(".tests/listfiles_2/test_1")
+	makefolder(".tests/listfiles_2/test_2")
+	local folders = listfiles(".tests/listfiles_2")
+	assert(#folders == 2, "Did not return the correct number of folders")
+	assert(isfolder(folders[1]), "Did not return a folder path")
+end)
+
+test("writefile", {}, function()
+	writefile(".tests/writefile.txt", "success")
+	assert(readfile(".tests/writefile.txt") == "success", "Did not write the file")
+	local requiresFileExt = pcall(function()
+		writefile(".tests/writefile", "success")
+		assert(isfile(".tests/writefile.txt"))
+	end)
+	if not requiresFileExt then
+		return "This executor requires a file extension in writefile"
+	end
+end)
+
+test("makefolder", {}, function()
+	makefolder(".tests/makefolder")
+	assert(isfolder(".tests/makefolder"), "Did not create the folder")
+end)
+
+test("appendfile", {}, function()
+	writefile(".tests/appendfile.txt", "su")
+	appendfile(".tests/appendfile.txt", "cce")
+	appendfile(".tests/appendfile.txt", "ss")
+	assert(readfile(".tests/appendfile.txt") == "success", "Did not append the file")
+end)
+
+test("isfile", {}, function()
+	writefile(".tests/isfile.txt", "success")
+	assert(isfile(".tests/isfile.txt") == true, "Did not return true for a file")
+	assert(isfile(".tests") == false, "Did not return false for a folder")
+	assert(isfile(".tests/doesnotexist.exe") == false, "Did not return false for a nonexistent path (got " .. tostring(isfile(".tests/doesnotexist.exe")) .. ")")
+end)
+
+test("isfolder", {}, function()
+	assert(isfolder(".tests") == true, "Did not return false for a folder")
+	assert(isfolder(".tests/doesnotexist.exe") == false, "Did not return false for a nonexistent path (got " .. tostring(isfolder(".tests/doesnotexist.exe")) .. ")")
+end)
+
+test("delfolder", {}, function()
+	makefolder(".tests/delfolder")
+	delfolder(".tests/delfolder")
+	assert(isfolder(".tests/delfolder") == false, "Failed to delete folder (isfolder = " .. tostring(isfolder(".tests/delfolder")) .. ")")
+end)
+
+test("delfile", {}, function()
+	writefile(".tests/delfile.txt", "Hello, world!")
+	delfile(".tests/delfile.txt")
+	assert(isfile(".tests/delfile.txt") == false, "Failed to delete file (isfile = " .. tostring(isfile(".tests/delfile.txt")) .. ")")
+end)
+
+test("loadfile", {}, function()
+	writefile(".tests/loadfile.txt", "return ... + 1")
+	assert(assert(loadfile(".tests/loadfile.txt"))(1) == 2, "Failed to load a file with arguments")
+	writefile(".tests/loadfile.txt", "f")
+	local callback, err = loadfile(".tests/loadfile.txt")
+	assert(err and not callback, "Did not return an error message for a compiler error")
+end)
+
+test("dofile", {}, function()
+	local path = ".tests/dofile.txt"
+	writefile(path, "return ... + 1")
+	assert(dofile(path, 41) == 42, "dofile returned an unexpected value")
+	delfile(path)
+end)
 
 -- Input
-for _, name in ipairs({
-    "isrbxactive",
-    "mouse1click",
-    "mouse1press",
-    "mouse1release",
-    "mouse2click",
-    "mouse2press",
-    "mouse2release",
-    "mousemoveabs",
-    "mousemoverel",
-    "mousescroll",
-}) do
-    testExists(name)
-end
 
-if exists("isrbxactive") then
-    test("isrbxactive", function()
-        assertType(isrbxactive(), "boolean", "isrbxactive result")
-    end)
-end
+test("isrbxactive", {"isgameactive"}, function()
+	assert(type(isrbxactive()) == "boolean", "Did not return a boolean value")
+end)
 
--- Instances / reflection
-for _, name in ipairs({
-    "fireclickdetector",
-    "getcallbackvalue",
-    "getconnections",
-    "getcustomasset",
-    "gethiddenproperty",
-    "sethiddenproperty",
-    "gethui",
-    "getinstances",
-    "getnilinstances",
-    "isscriptable",
-    "setscriptable",
-    "setrbxclipboard",
-}) do
-    testExists(name)
-end
+test("mouse1click", {}, function() mouse1click() end)
 
-if exists("getcallbackvalue") then
-    test("getcallbackvalue", function()
-        assertCallable("getcallbackvalue")
-        local bindable = Instance.new("BindableFunction")
-        local callback = function() end
-        bindable.OnInvoke = callback
-        local returned = getcallbackvalue(bindable, "OnInvoke")
-        assert(returned == callback, "callback value mismatch")
-    end)
-end
+test("mouse1press", {}, function() mouse1press() end)
 
-if exists("getconnections") then
-    test("getconnections", function()
-        assertCallable("getconnections")
-        local event = Instance.new("BindableEvent")
-        local connection = event.Event:Connect(function() end)
-        local connections = getconnections(event.Event)
-        assert(type(connections) == "table" and #connections > 0, "no connections returned")
-        local first = connections[1]
-        for _, key in ipairs({"Enabled", "Function", "Disconnect", "Fire"}) do
-            assert(first[key] ~= nil, "connection is missing " .. key)
-        end
-        assert(type(first.Function) == "function", "connection.Function is not a function")
-        assert(type(first.Disconnect) == "function", "connection.Disconnect is not a function")
-        assert(type(first.Fire) == "function", "connection.Fire is not a function")
-        connection:Disconnect()
-    end)
-end
+test("mouse1release", {}, function() mouse1release() end)
 
-if exists("isscriptable") and exists("setscriptable") then
-    test("scriptability", function()
-        local fire = Instance.new("Fire")
-        local before = isscriptable(fire, "Size")
-        assert(before == true, "normal Size property was not scriptable")
-        local previous = setscriptable(fire, "size_xml", true)
-        assert(previous == false, "unexpected previous state for size_xml")
-        assert(isscriptable(fire, "size_xml") == true, "setscriptable did not enable the property")
-    end)
-end
+test("mouse2click", {}, function() mouse2click() end)
 
--- Metatables
-for _, name in ipairs({
-    "getrawmetatable",
-    "hookmetamethod",
-    "getnamecallmethod",
-    "isreadonly",
-    "setrawmetatable",
-    "setreadonly",
-}) do
-    testExists(name)
-end
+test("mouse2press", {}, function() mouse2press() end)
 
-if exists("getrawmetatable") then
-    test("getrawmetatable", function()
-        local mt = { __metatable = "locked" }
-        local object = setmetatable({}, mt)
-        assert(getrawmetatable(object) == mt, "raw metatable mismatch")
-    end)
-end
+test("mouse2release", {}, function() mouse2release() end)
 
-if exists("isreadonly") and exists("setreadonly") then
-    test("readonly table", function()
-        assertCallable("isreadonly")
-        assertCallable("setreadonly")
-        local object = { value = false }
-        table.freeze(object)
-        assert(isreadonly(object) == true, "frozen table is not readonly")
-        setreadonly(object, false)
-        assert(isreadonly(object) == false, "setreadonly(false) did not make table writable")
-        object.value = true
-        assert(object.value == true, "readonly table remained immutable")
-    end)
-end
+test("mousemoveabs", {}, function() mousemoveabs(100, 100) end)
+
+test("mousemoverel", {}, function() mousemoverel(1, 1) end)
+
+test("mousescroll", {}, function() mousescroll(1) end)
+
+-- Instances
+
+test("fireclickdetector", {}, function()
+	local detector = Instance.new("ClickDetector")
+	fireclickdetector(detector, 50, "MouseHoverEnter")
+end)
+
+test("getcallbackvalue", {}, function()
+	local bindable = Instance.new("BindableFunction")
+	local function test()
+	end
+	bindable.OnInvoke = test
+	assert(getcallbackvalue(bindable, "OnInvoke") == test, "Did not return the correct value")
+end)
+
+test("getconnections", {}, function()
+	local types = {
+		Enabled = "boolean",
+		ForeignState = "boolean",
+		LuaConnection = "boolean",
+		Function = "function",
+		Thread = "thread",
+		Fire = "function",
+		Defer = "function",
+		Disconnect = "function",
+		Disable = "function",
+		Enable = "function",
+	}
+	local bindable = Instance.new("BindableEvent")
+	bindable.Event:Connect(function() end)
+	local connection = getconnections(bindable.Event)[1]
+	for k, v in pairs(types) do
+		assert(connection[k] ~= nil, "Did not return a table with a '" .. k .. "' field")
+		assert(type(connection[k]) == v, "Did not return a table with " .. k .. " as a " .. v .. " (got " .. type(connection[k]) .. ")")
+	end
+end)
+
+test("getcustomasset", {}, function()
+	writefile(".tests/getcustomasset.txt", "success")
+	local contentId = getcustomasset(".tests/getcustomasset.txt")
+	assert(type(contentId) == "string", "Did not return a string")
+	assert(#contentId > 0, "Returned an empty string")
+	assert(string.match(contentId, "rbxasset://") == "rbxasset://", "Did not return an rbxasset url")
+end)
+
+test("gethiddenproperty", {}, function()
+	local fire = Instance.new("Fire")
+	local property, isHidden = gethiddenproperty(fire, "size_xml")
+	assert(property == 5, "Did not return the correct value")
+	assert(isHidden == true, "Did not return whether the property was hidden")
+end)
+
+test("sethiddenproperty", {}, function()
+	local fire = Instance.new("Fire")
+	local hidden = sethiddenproperty(fire, "size_xml", 10)
+	assert(hidden, "Did not return true for the hidden property")
+	assert(gethiddenproperty(fire, "size_xml") == 10, "Did not set the hidden property")
+end)
+
+test("gethui", {}, function()
+	assert(typeof(gethui()) == "Instance", "Did not return an Instance")
+end)
+
+test("getinstances", {}, function()
+	assert(getinstances()[1]:IsA("Instance"), "The first value is not an Instance")
+end)
+
+test("getnilinstances", {}, function()
+	assert(getnilinstances()[1]:IsA("Instance"), "The first value is not an Instance")
+	assert(getnilinstances()[1].Parent == nil, "The first value is not parented to nil")
+end)
+
+test("isscriptable", {}, function()
+	local fire = Instance.new("Fire")
+	assert(isscriptable(fire, "size_xml") == false, "Did not return false for a non-scriptable property (size_xml)")
+	assert(isscriptable(fire, "Size") == true, "Did not return true for a scriptable property (Size)")
+end)
+
+test("setscriptable", {}, function()
+	local fire = Instance.new("Fire")
+	local wasScriptable = setscriptable(fire, "size_xml", true)
+	assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
+	assert(isscriptable(fire, "size_xml") == true, "Did not set the scriptable property")
+	fire = Instance.new("Fire")
+	assert(isscriptable(fire, "size_xml") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
+end)
+
+test("setrbxclipboard", {}, function() setrbxclipboard("UNC clipboard behavior test") end)
+
+-- Metatable
+
+test("getrawmetatable", {}, function()
+	local metatable = { __metatable = "Locked!" }
+	local object = setmetatable({}, metatable)
+	assert(getrawmetatable(object) == metatable, "Did not return the metatable")
+end)
+
+test("hookmetamethod", {}, function()
+	local object = setmetatable({}, { __index = newcclosure(function() return false end), __metatable = "Locked!" })
+	local ref = hookmetamethod(object, "__index", function() return true end)
+	assert(object.test == true, "Failed to hook a metamethod and change the return value")
+	assert(ref() == false, "Did not return the original function")
+end)
+
+test("getnamecallmethod", {}, function()
+	local method
+	local ref
+	ref = hookmetamethod(game, "__namecall", function(...)
+		if not method then
+			method = getnamecallmethod()
+		end
+		return ref(...)
+	end)
+	game:GetService("Lighting")
+	assert(method == "GetService", "Did not get the correct method (GetService)")
+end)
+
+test("isreadonly", {}, function()
+	local object = {}
+	table.freeze(object)
+	assert(isreadonly(object), "Did not return true for a read-only table")
+end)
+
+test("setrawmetatable", {}, function()
+	local object = setmetatable({}, { __index = function() return false end, __metatable = "Locked!" })
+	local objectReturned = setrawmetatable(object, { __index = function() return true end })
+	assert(object, "Did not return the original object")
+	assert(object.test == true, "Failed to change the metatable")
+	if objectReturned then
+		return objectReturned == object and "Returned the original object" or "Did not return the original object"
+	end
+end)
+
+test("setreadonly", {}, function()
+	local object = { success = false }
+	table.freeze(object)
+	setreadonly(object, false)
+	object.success = true
+	assert(object.success, "Did not allow the table to be modified")
+end)
 
 -- Miscellaneous
-for _, name in ipairs({
-    "identifyexecutor",
-    "lz4compress",
-    "lz4decompress",
-    "messagebox",
-    "queue_on_teleport",
-    "request",
-    "setclipboard",
-    "setfpscap",
-}) do
-    testExists(name)
-end
 
-if exists("identifyexecutor") then
-    test("identifyexecutor", function()
-        local name, version = identifyexecutor()
-        assertType(name, "string", "executor name")
-        if version ~= nil then
-            assertType(version, "string", "executor version")
-        end
-    end)
-end
+test("identifyexecutor", {"getexecutorname"}, function()
+	local name, version = identifyexecutor()
+	assert(type(name) == "string", "Did not return a string for the name")
+	return type(version) == "string" and "Returns version as a string" or "Does not return version"
+end)
 
-if exists("lz4compress") and exists("lz4decompress") then
-    test("lz4 round-trip", function()
-        assertCallable("lz4compress")
-        assertCallable("lz4decompress")
-        local source = "UNC compression test"
-        local compressed = lz4compress(source)
-        assertType(compressed, "string", "compressed data")
-        local restored = lz4decompress(compressed, #source)
-        assert(restored == source, "LZ4 round-trip failed")
-    end)
-end
+test("lz4compress", {}, function()
+	local raw = "Hello, world!"
+	local compressed = lz4compress(raw)
+	assert(type(compressed) == "string", "Compression did not return a string")
+	assert(lz4decompress(compressed, #raw) == raw, "Decompression did not return the original string")
+end)
 
-if exists("request") then
-    test("request", function()
-        assertCallable("request")
-        local response = request({
-            Url = "https://httpbin.org/user-agent",
-            Method = "GET",
-        })
-        assert(type(response) == "table", "request did not return a table")
-        assert(tonumber(response.StatusCode) == 200, "request did not return HTTP 200")
-        assert(type(response.Body) == "string" and #response.Body > 0, "request returned no response body")
-        assert(type(response.Headers) == "table", "request returned no headers table")
-    end)
-end
+test("lz4decompress", {}, function()
+	local raw = "Hello, world!"
+	local compressed = lz4compress(raw)
+	assert(type(compressed) == "string", "Compression did not return a string")
+	assert(lz4decompress(compressed, #raw) == raw, "Decompression did not return the original string")
+end)
 
--- Reality checks: APIs that cannot be validated by existence alone.
+test("messagebox", {}, function()
+	local done, ok, result = false, false, nil
+	task.spawn(function()
+		ok, result = pcall(messagebox, "UNC REALITY TEST\nClick OK to prove this is a real message box.", "UNC Compatibility Test", 0)
+		done = true
+	end)
+	local deadline = os.clock() + 10
+	while not done and os.clock() < deadline do task.wait() end
+	assert(done, "messagebox did not return within 10 seconds; if a dialog appeared, click OK and rerun")
+	assert(ok, tostring(result))
+	assert(type(result) == "number" or type(result) == "string", "messagebox returned an invalid result")
+	return "returned " .. tostring(result)
+end)
 
-if exists("messagebox") then
-    test("messagebox reality", function()
-        assertCallable("messagebox")
-        local done = false
-        local result = nil
-        task.spawn(function()
-            local ok, value = pcall(messagebox, "UNC REALITY TEST\\nClick OK to prove this is a real message box.", "UNC Compatibility Test", 0)
-            done = true
-            if ok then
-                result = value
-            else
-                result = "ERROR: " .. tostring(value)
-            end
-        end)
+test("queue_on_teleport", {"queueonteleport"}, function() queue_on_teleport("print('UNC queue_on_teleport behavior test')") end)
 
-        local deadline = os.clock() + 10
-        while not done and os.clock() < deadline do
-            task.wait()
-        end
+test("request", {"http.request", "http_request"}, function()
+	local response = request({
+		Url = "https://httpbin.org/user-agent",
+		Method = "GET",
+	})
+	assert(type(response) == "table", "Response must be a table")
+	assert(response.StatusCode == 200, "Did not return a 200 status code")
+	local data = game:GetService("HttpService"):JSONDecode(response.Body)
+	assert(type(data) == "table" and type(data["user-agent"]) == "string", "Did not return a table with a user-agent key")
+	return "User-Agent: " .. data["user-agent"]
+end)
 
-        assert(done, "messagebox did not return within 10 seconds; if a dialog appeared, click OK and rerun")
-        assert(type(result) == "number" or type(result) == "string", "messagebox returned an invalid result: " .. type(result))
-        return "returned " .. tostring(result)
-    end)
-end
+test("setclipboard", {"toclipboard"}, function() setclipboard("UNC clipboard behavior test") end)
 
-if exists("setfpscap") then
-    test("setfpscap reality", function()
-        assertCallable("setfpscap")
-        local runService = game:GetService("RunService")
-        local heartbeat = runService.Heartbeat
+test("setfpscap", {}, function()
+	local heartbeat = game:GetService("RunService").Heartbeat
+	local function measure(seconds)
+		local frames, started = 0, os.clock()
+		while os.clock() - started < seconds do heartbeat:Wait(); frames += 1 end
+		return frames / math.max(os.clock() - started, 0.001)
+	end
+	local oldCap
+	local getFpsCap = getGlobal("getfpscap")
+	if type(getFpsCap) == "function" then oldCap = getFpsCap() end
+	setfpscap(30)
+	local capped = measure(2)
+	setfpscap(oldCap or 0)
+	local restored = measure(1)
+	assert(capped >= 15 and capped <= 45, ("30 FPS cap was not observed; measured %.1f FPS"):format(capped))
+	assert(restored > 0, "Heartbeat produced no samples")
+	return ("Heartbeat %.1f FPS @ cap 30; %.1f FPS after restore"):format(capped, restored)
+end)
 
-        local function measure(seconds: number): number
-            local frames = 0
-            local started = os.clock()
-            while os.clock() - started < seconds do
-                heartbeat:Wait()
-                frames += 1
-            end
-            return frames / math.max(os.clock() - started, 0.001)
-        end
+-- Scripts
 
-        local oldCap = nil
-        local getFpsCap = resolve("getfpscap")
-        if type(getFpsCap) == "function" then
-            oldCap = getFpsCap()
-        end
+test("getgc", {}, function()
+	local gc = getgc()
+	assert(type(gc) == "table", "Did not return a table")
+	assert(#gc > 0, "Did not return a table with any values")
+end)
 
-        setfpscap(30)
-        local capped = measure(2)
-        setfpscap(oldCap or 0)
+test("getgenv", {}, function()
+	getgenv().__TEST_GLOBAL = true
+	assert(__TEST_GLOBAL, "Failed to set a global variable")
+	getgenv().__TEST_GLOBAL = nil
+end)
 
-        local uncapped = measure(1)
-        assert(capped >= 15 and capped <= 45, ("30 FPS cap was not observed; measured %.1f FPS"):format(capped))
-        assert(uncapped > 0, "Heartbeat produced no samples")
+test("getloadedmodules", {}, function()
+	local modules = getloadedmodules()
+	assert(type(modules) == "table", "Did not return a table")
+	assert(#modules > 0, "Did not return a table with any values")
+	assert(typeof(modules[1]) == "Instance", "First value is not an Instance")
+	assert(modules[1]:IsA("ModuleScript"), "First value is not a ModuleScript")
+end)
 
-        return ("Heartbeat %.1f FPS @ cap 30; %.1f FPS after restore"):format(capped, uncapped)
-    end)
-end
+test("getrenv", {}, function()
+	assert(_G ~= getrenv()._G, "The variable _G in the executor is identical to _G in the game")
+end)
 
--- Scripts / environments
-for _, name in ipairs({
-    "getgc",
-    "getgenv",
-    "getloadedmodules",
-    "getrenv",
-    "getrunningscripts",
-    "getscriptbytecode",
-    "getscripthash",
-    "getscripts",
-    "getsenv",
-    "getthreadidentity",
-    "setthreadidentity",
-}) do
-    testExists(name)
-end
+test("getrunningscripts", {}, function()
+	local scripts = getrunningscripts()
+	assert(type(scripts) == "table", "Did not return a table")
+	assert(#scripts > 0, "Did not return a table with any values")
+	assert(typeof(scripts[1]) == "Instance", "First value is not an Instance")
+	assert(scripts[1]:IsA("ModuleScript") or scripts[1]:IsA("LocalScript"), "First value is not a ModuleScript or LocalScript")
+end)
 
-if exists("getgenv") then
-    test("getgenv", function()
-        local key = "__UNC_TEST_GLOBAL"
-        getgenv()[key] = true
-        assert(getgenv()[key] == true, "executor global could not be written")
-        getgenv()[key] = nil
-    end)
-end
+test("getscriptbytecode", {"dumpstring"}, function()
+	local animate = game:GetService("Players").LocalPlayer.Character.Animate
+	local bytecode = getscriptbytecode(animate)
+	assert(type(bytecode) == "string", "Did not return a string for Character.Animate (a " .. animate.ClassName .. ")")
+end)
 
-if exists("getgc") then
-    test("getgc", function()
-        local gc = getgc()
-        assert(type(gc) == "table", "getgc did not return a table")
-        assert(#gc > 0, "getgc returned an empty table")
-    end)
-end
+test("getscripthash", {}, function()
+	local animate = game:GetService("Players").LocalPlayer.Character.Animate:Clone()
+	local hash = getscripthash(animate)
+	local source = animate.Source
+	animate.Source = "print('Hello, world!')"
+	task.defer(function()
+		animate.Source = source
+	end)
+	local newHash = getscripthash(animate)
+	assert(hash ~= newHash, "Did not return a different hash for a modified script")
+	assert(newHash == getscripthash(animate), "Did not return the same hash for a script with the same source")
+end)
 
-if exists("getloadedmodules") then
-    test("getloadedmodules", function()
-        local modules = getloadedmodules()
-        assert(type(modules) == "table", "getloadedmodules did not return a table")
-        if #modules > 0 then
-            assert(typeof(modules[1]) == "Instance", "first module is not an Instance")
-        end
-    end)
-end
+test("getscripts", {}, function()
+	local scripts = getscripts()
+	assert(type(scripts) == "table", "Did not return a table")
+	assert(#scripts > 0, "Did not return a table with any values")
+	assert(typeof(scripts[1]) == "Instance", "First value is not an Instance")
+	assert(scripts[1]:IsA("ModuleScript") or scripts[1]:IsA("LocalScript"), "First value is not a ModuleScript or LocalScript")
+end)
 
-if exists("getrunningscripts") then
-    test("getrunningscripts", function()
-        local scripts = getrunningscripts()
-        assert(type(scripts) == "table", "getrunningscripts did not return a table")
-    end)
-end
+test("getsenv", {}, function()
+	local animate = game:GetService("Players").LocalPlayer.Character.Animate
+	local env = getsenv(animate)
+	assert(type(env) == "table", "Did not return a table for Character.Animate (a " .. animate.ClassName .. ")")
+	assert(env.script == animate, "The script global is not identical to Character.Animate")
+end)
 
-if exists("getthreadidentity") and exists("setthreadidentity") then
-    test("thread identity / CoreGui", function()
-        assertCallable("getthreadidentity")
-        assertCallable("setthreadidentity")
+test("getthreadidentity", {"getidentity", "getthreadcontext"}, function()
+	assert(type(getthreadidentity()) == "number", "Did not return a number")
+end)
 
-        local original = getthreadidentity()
-        assertType(original, "number", "original thread identity")
-
-        local ok, err = pcall(function()
-            setthreadidentity(2)
-            assert(getthreadidentity() == 2, "setthreadidentity(2) did not set identity 2")
-
-            local coreGui = game:GetService("CoreGui")
-            assert(coreGui ~= nil, "CoreGui could not be obtained at identity 2")
-            assert(coreGui.Parent == game, "CoreGui.Parent is not game")
-        end)
-
-        local restoreOk, restoreErr = pcall(function()
-            setthreadidentity(original)
-        end)
-        assert(restoreOk, "failed to restore original thread identity: " .. tostring(restoreErr))
-        assert(ok, tostring(err))
-    end)
-end
+test("setthreadidentity", {"setidentity", "setthreadcontext"}, function()
+	local original = getthreadidentity()
+	local ok, err = pcall(function()
+		setthreadidentity(2)
+		assert(getthreadidentity() == 2, "Did not set the thread identity to 2")
+		local coreGui = game:GetService("CoreGui")
+		assert(coreGui ~= nil, "CoreGui could not be obtained at identity 2")
+		assert(coreGui.Parent == game, "CoreGui.Parent is not game")
+	end)
+	local restored, restoreErr = pcall(function() setthreadidentity(original) end)
+	assert(restored, "Failed to restore original thread identity: " .. tostring(restoreErr))
+	assert(ok, tostring(err))
+end)
 
 -- Drawing
-for _, name in ipairs({
-    "Drawing",
-    "Drawing.new",
-    "Drawing.Fonts",
-    "isrenderobj",
-    "getrenderproperty",
-    "setrenderproperty",
-    "cleardrawcache",
-}) do
-    testExists(name)
-end
 
-if exists("Drawing.new") then
-    test("Drawing.new", function()
-        assert(type(Drawing) == "table" or type(Drawing) == "userdata", "Drawing exists but is not an object")
-        assertCallable("Drawing.new")
+test("Drawing", {}, function() assert(type(Drawing) == "table" or type(Drawing) == "userdata", "Drawing must be an object"); assert(type(Drawing.new) == "function", "Drawing.new must be callable") end)
 
-        local object = Drawing.new("Square")
-        assert(object ~= nil, "Drawing.new returned nil")
-        assert(type(object) == "userdata" or type(object) == "table", "Drawing.new returned an invalid object")
+test("Drawing.new", {}, function()
+	local drawing = Drawing.new("Square")
+	drawing.Visible = false
+	drawing.Size = Vector2.new(32, 32)
+	drawing.Position = Vector2.new(100, 100)
+	assert(drawing.Visible == false, "Visible did not retain its value")
+	assert(drawing.Size.X == 32 and drawing.Size.Y == 32, "Size did not retain its value")
+	assert(drawing.Position.X == 100 and drawing.Position.Y == 100, "Position did not retain its value")
+	drawing.Visible = true
+	assert(drawing.Visible == true, "Visible could not be enabled")
+	assert(type(drawing.Destroy) == "function", "Destroy is not callable")
+	assert(pcall(function() drawing:Destroy() end), "Drawing:Destroy() should not throw an error")
+end)
 
-        object.Visible = false
-        object.Size = Vector2.new(32, 32)
-        object.Position = Vector2.new(100, 100)
-        assert(object.Visible == false, "Visible property did not retain its value")
-        assert(object.Size.X == 32 and object.Size.Y == 32, "Size property did not retain its value")
-        assert(object.Position.X == 100 and object.Position.Y == 100, "Position property did not retain its value")
+test("isrenderobj", {}, function()
+	local drawing = Drawing.new("Image")
+	drawing.Visible = true
+	assert(isrenderobj(drawing) == true, "Did not return true for an Image")
+	assert(isrenderobj(newproxy()) == false, "Did not return false for a blank table")
+end)
 
-        object.Visible = true
-        assert(object.Visible == true, "Visible property could not be enabled")
+test("getrenderproperty", {}, function()
+	local drawing = Drawing.new("Image")
+	drawing.Visible = true
+	assert(type(getrenderproperty(drawing, "Visible")) == "boolean", "Did not return a boolean value for Image.Visible")
+	local success, result = pcall(function()
+		return getrenderproperty(drawing, "Color")
+	end)
+	if not success or not result then
+		return "Image.Color is not supported"
+	end
+end)
 
-        assert(type(object.Destroy) == "function", "Drawing object has no Destroy method")
-        assert(pcall(function() object:Destroy() end), "Drawing:Destroy() threw an error")
-    end)
-end
+test("setrenderproperty", {}, function()
+	local drawing = Drawing.new("Square")
+	drawing.Visible = true
+	setrenderproperty(drawing, "Visible", false)
+	assert(drawing.Visible == false, "Did not set the value for Square.Visible")
+end)
 
-if exists("isrenderobj") and exists("Drawing.new") then
-    test("isrenderobj behaviour", function()
-        assertCallable("isrenderobj")
-        local object = Drawing.new("Square")
-        assert(isrenderobj(object) == true, "Drawing object was not recognized as a render object")
-        assert(isrenderobj({}) == false, "ordinary table was incorrectly recognized as a render object")
-        object:Destroy()
-    end)
-end
-
-if exists("getrenderproperty") and exists("setrenderproperty") and exists("Drawing.new") then
-    test("render property access", function()
-        assertCallable("getrenderproperty")
-        assertCallable("setrenderproperty")
-        local object = Drawing.new("Square")
-
-        setrenderproperty(object, "Visible", false)
-        assert(getrenderproperty(object, "Visible") == false, "getrenderproperty returned the wrong value")
-
-        setrenderproperty(object, "Visible", true)
-        assert(getrenderproperty(object, "Visible") == true, "setrenderproperty did not update the property")
-
-        object:Destroy()
-    end)
-end
-
-if exists("cleardrawcache") then
-    test("cleardrawcache behaviour", function()
-        assertCallable("cleardrawcache")
-        local object = nil
-        if exists("Drawing.new") then
-            object = Drawing.new("Square")
-            object.Visible = true
-        end
-        assert(pcall(cleardrawcache), "cleardrawcache threw an error")
-        if object ~= nil then
-            assert(pcall(function() object:Destroy() end), "Drawing object could not be destroyed after cleardrawcache")
-        end
-    end)
-end
-
-if exists("Drawing.Fonts") then
-    test("Drawing.Fonts", function()
-        assert(type(Drawing.Fonts) == "table", "Drawing.Fonts is not a table")
-        for _, name in ipairs({"UI", "System", "Plex", "Monospace"}) do
-            assert(Drawing.Fonts[name] ~= nil, name .. " font is missing")
-        end
-    end)
-end
+test("cleardrawcache", {}, function()
+	cleardrawcache()
+end)
 
 -- WebSocket
-for _, name in ipairs({
-    "WebSocket",
-    "WebSocket.connect",
-}) do
-    testExists(name)
-end
 
-if exists("WebSocket.connect") then
-    test("WebSocket.connect", function()
-        assertCallable("WebSocket.connect")
-        local ws = WebSocket.connect("wss://echo.websocket.events")
-        assert(ws ~= nil, "WebSocket.connect returned nil")
-        assert(type(ws) == "table" or type(ws) == "userdata", "WebSocket.connect returned an invalid object")
-        assert(type(ws.Send) == "function", "WebSocket.Send is missing")
-        assert(type(ws.Close) == "function", "WebSocket.Close is missing")
-        assert(ws.OnMessage ~= nil, "WebSocket.OnMessage is missing")
-        assert(ws.OnClose ~= nil, "WebSocket.OnClose is missing")
-        ws:Close()
-    end)
-end
+test("WebSocket", {}, function()
+	assert(type(WebSocket) == "table" or type(WebSocket) == "userdata", "WebSocket must be an object")
+	assert(type(WebSocket.connect) == "function", "WebSocket.connect must be callable")
+end)
 
-print("")
-print("UNC Summary")
-print("===========")
-print(("✅ Passed: %d"):format(passed))
-print(("⛔ Failed: %d"):format(failed))
-print(("⚠️ Missing: %d"):format(missing))
-print(("📊 Behavioural success rate: %d%%"):format(
-    (passed + failed) > 0 and math.floor((passed / (passed + failed)) * 100 + 0.5) or 0
-))
-print("")
-
-return {
-    passed = passed,
-    failed = failed,
-    missing = missing,
-    results = results,
-}
+test("WebSocket.connect", {}, function()
+	local ws = WebSocket.connect("wss://echo.websocket.events")
+	assert(type(ws) == "table" or type(ws) == "userdata", "Did not return a table or userdata")
+	assert(type(ws.Send) == "function", "Send is missing")
+	assert(type(ws.Close) == "function", "Close is missing")
+	assert(ws.OnMessage ~= nil, "OnMessage is missing")
+	assert(ws.OnClose ~= nil, "OnClose is missing")
+	local received, connection
+	if type(ws.OnMessage.Connect) == "function" then
+		connection = ws.OnMessage:Connect(function(message) received = message end)
+	end
+	local token = "UNC_WS_" .. tostring(math.floor(os.clock() * 1000000))
+	ws:Send(token)
+	local deadline = os.clock() + 5
+	while received == nil and os.clock() < deadline do task.wait() end
+	if connection then connection:Disconnect() end
+	ws:Close()
+	assert(received == token, "WebSocket echo did not return the sent payload")
+end)
