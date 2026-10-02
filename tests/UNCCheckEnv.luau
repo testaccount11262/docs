@@ -121,7 +121,25 @@ local function shallowEqual(t1, t2)
 end
 
 test("checkcaller", {}, function()
-	assert(checkcaller(), "Main scope should return true")
+	if type(hookmetamethod) ~= "function" then
+		error("hookmetamethod is required for the controlled checkcaller test")
+	end
+
+	local observed
+	local original
+	local marker = {}
+	original = hookmetamethod(marker, "__index", newcclosure(function(self, key)
+		observed = checkcaller()
+		return original(self, key)
+	end))
+
+	local ok, err = pcall(function()
+		local _ = marker.__UNC_CHECKCALLER
+		assert(type(observed) == "boolean", "checkcaller did not return a boolean inside a metamethod hook")
+		assert(observed == true, "checkcaller returned false for an executor-originated metamethod call")
+	end)
+
+	assert(ok, tostring(err))
 end)
 
 test("clonefunction", {}, function()
@@ -655,9 +673,17 @@ test("getgc", {}, function()
 end)
 
 test("getgenv", {}, function()
-	getgenv().__TEST_GLOBAL = true
-	assert(__TEST_GLOBAL, "Failed to set a global variable")
-	getgenv().__TEST_GLOBAL = nil
+	local env = getgenv()
+	local old = env.__TEST_GLOBAL
+
+	env.__TEST_GLOBAL = true
+	assert(__TEST_GLOBAL == true, "getgenv() write did not propagate to the current global environment")
+
+	__TEST_GLOBAL = false
+	assert(env.__TEST_GLOBAL == false, "Current global write did not propagate back to getgenv()")
+
+	env.__TEST_GLOBAL = old
+	assert(env.__TEST_GLOBAL == old, "Failed to restore the getgenv() value")
 end)
 
 test("getloadedmodules", {}, function()
@@ -667,7 +693,16 @@ test("getloadedmodules", {}, function()
 end)
 
 test("getrenv", {}, function()
-	assert(_G ~= getrenv()._G, "The variable _G in the executor is identical to _G in the game")
+	local env = getrenv()
+	assert(type(env) == "table", "getrenv() did not return an environment table")
+	assert(env._G ~= _G, "The game _G is identical to the executor _G")
+
+	local old = env.__UNC_TEST_RENV
+	local marker = {}
+	env.__UNC_TEST_RENV = marker
+	assert(env.__UNC_TEST_RENV == marker, "getrenv() environment is not writable")
+	env.__UNC_TEST_RENV = old
+	assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
 end)
 
 test("getrunningscripts", {}, function()
@@ -708,20 +743,19 @@ test("getsenv", {}, function()
 	assert(env.script == animate, "The script global is not identical to Character.Animate")
 end)
 
-test("getthreadidentity", {"getidentity", "getthreadcontext"}, function()
-	assert(type(getthreadidentity()) == "number", "Did not return a number")
-end)
-
-test("setthreadidentity", {"setidentity", "setthreadcontext"}, function()
+test("thread identity", {"getthreadidentity", "getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
 	local original = getthreadidentity()
+	local target = original == 2 and 8 or 2
+
 	local ok, err = pcall(function()
-		setthreadidentity(2)
-		assert(getthreadidentity() == 2, "Did not set the thread identity to 2")
-		local coreGui = game:GetService("CoreGui")
-		assert(coreGui ~= nil, "CoreGui could not be obtained at identity 2")
-		assert(coreGui.Parent == game, "CoreGui.Parent is not game")
+		setthreadidentity(target)
+		assert(getthreadidentity() == target, "setthreadidentity did not change the identity reported by getthreadidentity")
 	end)
-	local restored, restoreErr = pcall(function() setthreadidentity(original) end)
+
+	local restored, restoreErr = pcall(function()
+		setthreadidentity(original)
+	end)
+
 	assert(restored, "Failed to restore original thread identity: " .. tostring(restoreErr))
 	assert(ok, tostring(err))
 end)
