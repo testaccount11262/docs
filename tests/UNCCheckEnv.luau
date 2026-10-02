@@ -126,11 +126,14 @@ test("checkcaller", {}, function()
 	end
 
 	local observed
-	local original
-	local marker = {}
-	original = hookmetamethod(marker, "__index", newcclosure(function(self, key)
+	local marker = setmetatable({}, {
+		__index = newcclosure(function()
+			return false
+		end)
+	})
+	hookmetamethod(marker, "__index", newcclosure(function(self, key)
 		observed = checkcaller()
-		return original(self, key)
+		return false
 	end))
 
 	local ok, err = pcall(function()
