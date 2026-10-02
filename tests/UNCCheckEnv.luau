@@ -519,8 +519,9 @@ if exists("setfpscap") then
         end
 
         local oldCap = nil
-        if exists("getfpscap") and type(getfpscap) == "function" then
-            oldCap = getfpscap()
+        local getFpsCap = resolve("getfpscap")
+        if type(getFpsCap) == "function" then
+            oldCap = getFpsCap()
         end
 
         setfpscap(30)
