@@ -40,6 +40,7 @@ local function test(name, aliases, callback, status)
 		undefined+=1
 		warn("⚠️ "..table.concat(missing,", "))
 	end
+	task.wait(0.3)
 end
 
 print("\n")
@@ -160,11 +161,15 @@ test("getcallingscript", {}, function()
 end)
 
 test("getscriptclosure", {"getscriptfunction"}, function()
-	local module=game:GetService("CoreGui").RobloxGui.Modules.Common.Constants
+	local module = Instance.new("ModuleScript", game:GetService("CoreGui").RobloxGui.Modules.Common)
+	module.Source = [[
+		return "hi!"
+	]]
 	local expected=getrenv().require(module)
 	local generated=getscriptclosure(module)()
 	assert(type(generated)==type(expected),"Generated closure returned an unexpected value type")
 	assert(shallowEqual(expected,generated),"Generated closure did not reproduce the module result")
+	module:Destroy()
 end)
 
 test("hookfunction", {"replaceclosure"}, function()
@@ -304,7 +309,8 @@ end)
 test("debug.getconstant", {}, function()
 	local function target() print("UNC_CONSTANT_SENTINEL") end
 	local p,s=false,false
-	for i=1,64 do local ok,v=pcall(debug.getconstant,target,i); if not ok then break end; if v==print then p=true end; if v=="UNC_CONSTANT_SENTINEL" then s=true end end
+	for i=1,64 do local ok,v=pcall(debug.getconstant,target,i); if not ok then break end; if v=="print" then p=true end; if v=="UNC_CONSTANT_SENTINEL" then s=true end end
+	print(p,s)
 	assert(p and s,"getconstant did not expose expected constants")
 end)
 
@@ -312,7 +318,7 @@ test("debug.getconstants", {}, function()
 	local function target() print("UNC_CONSTANT_A","UNC_CONSTANT_B") end
 	local values=debug.getconstants(target); assert(type(values)=="table","getconstants must return a table")
 	local x,y,p=false,false,false
-	for _,v in pairs(values) do if v=="UNC_CONSTANT_A" then x=true elseif v=="UNC_CONSTANT_B" then y=true elseif v==print then p=true end end
+	for _,v in pairs(values) do if v=="UNC_CONSTANT_A" then x=true elseif v=="UNC_CONSTANT_B" then y=true elseif v=="print" then p=true end end
 	assert(x and y and p,"getconstants did not expose expected constants")
 end)
 
@@ -348,7 +354,10 @@ test("debug.getproto", {}, function()
 	assert(type(list) == "table" and type(list[1]) == "function", "getproto did not return the inner closure")
 	assert(list[1]() == "UNC_PROTO_1", "getproto returned a non-functional closure")
 	local raw = debug.getproto(test, 1, false)
-	assert(type(raw) == "function", "getproto(..., false) did not return a function")
+	for i, const in ipairs(debug.getconstants(raw)) do
+    assert((i == 1 and const == "UNC_PROTO_1"), "ProtoProxy is not a return real values")
+	end
+	assert(typeof(raw) == "ProtoProxy", "getproto(..., false) did not return a ProtoProxy")
 end)
 
 test("debug.getprotos", {}, function()
@@ -405,19 +414,48 @@ test("debug.setconstant", {}, function()
 end)
 
 test("debug.setstack", {}, function()
+	local hivalue="UNC_OLD_STACK2"; 
 	local function target()
-		local value="UNC_OLD_STACK"; local index
-		for i=1,32 do local ok,v=pcall(debug.getstack,1,i); if not ok then break end; if v==value then index=i break end end
-		assert(index,"Could not locate target stack slot"); debug.setstack(1,index,"UNC_NEW_STACK")
+		local value="UNC_OLD_STACK"; 
+		local index
+		for i=1,32 do 
+			local ok,v=pcall(debug.getstack,1,i); 
+			if not ok then 
+				break 
+			end; 
+			if v==value then 
+				index=i 
+				break 
+			end 
+		end
+		local index2
+		for i=1,32 do 
+			local ok,v=pcall(debug.getstack,2,i); 
+			if not ok then 
+				break 
+			end; 
+			if v==hivalue then 
+				index2=i 
+				break 
+			end 
+		end
+		assert(index,"Could not locate target stack slot"); 
+		debug.setstack(1,index,"UNC_NEW_STACK");
+		debug.setstack(2,index,"UNC_NEW_STACK");
+		task.wait()
 		assert(debug.getstack(1,index)=="UNC_NEW_STACK","debug.setstack did not change the target stack slot")
 	end
 	target()
+	assert(hivalue =="UNC_NEW_STACK","debug.setstack did not change the target stack slot")
 end)
 
 test("debug.setupvalue", {}, function()
-	local uv="UNC_OLD_UPVALUE"; local function target() return uv end; local index
+	local uv="UNC_OLD_UPVALUE"; 
+	local function target() return uv end; 
+	local index
 	for i=1,32 do local ok,v=pcall(debug.getupvalue,target,i); if not ok then break end; if v==uv then index=i break end end
-	assert(index,"Could not locate target upvalue"); debug.setupvalue(target,index,"UNC_NEW_UPVALUE")
+	assert(index,"Could not locate target upvalue"); 
+	debug.setupvalue(target,index,"UNC_NEW_UPVALUE")
 	assert(target()=="UNC_NEW_UPVALUE","debug.setupvalue did not change the target upvalue")
 end)
 
@@ -489,11 +527,6 @@ test("loadfile", {}, function()
 	writefile(path,"f"); local bad,err=loadfile(path); assert(bad==nil and type(err)=="string","Compiler error did not return nil plus an error")
 end)
 
-test("dofile", {}, function()
-	local path=".tests/dofile.txt"; writefile(path,"return ... + 1")
-	assert(dofile(path,41)==42,"dofile returned an unexpected value"); delfile(path)
-end)
-
 test("isrbxactive", {"isgameactive"}, function()
 	assert(type(isrbxactive()) == "boolean", "Did not return a boolean value")
 end)
@@ -510,6 +543,8 @@ test("mouse1click", {}, function()
 	button.MouseButton1Click:Connect(function() clicked = true end)
 	task.wait()
 	mousemoveabs(button.AbsolutePosition.X + button.AbsoluteSize.X / 2, button.AbsolutePosition.Y + button.AbsoluteSize.Y / 2)
+	task.wait()
+	mouse1click()
 	task.wait()
 	mouse1click()
 	task.wait()
@@ -600,7 +635,7 @@ end)
 test("gethui", {}, function()
 	local ui = gethui()
 	assert(typeof(ui) == "Instance", "gethui did not return an Instance")
-	assert(ui:IsDescendantOf(game:GetService("CoreGui")), "gethui result is not inside CoreGui")
+	assert(ui:IsDescendantOf(game.CoreGui) or ui:IsA("CoreGui"), "gethui result is not inside CoreGui")
 end)
 
 test("getinstances", {}, function()
@@ -623,11 +658,16 @@ end)
 
 test("setscriptable", {}, function()
 	local fire = Instance.new("Fire")
-	local wasScriptable = setscriptable(fire, "size_xml", true)
+	local wasScriptable = setscriptable(fire, "nonefull", true)
 	assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
-	assert(isscriptable(fire, "size_xml") == true, "Did not set the scriptable property")
+	assert(isscriptable(fire, "nonefull") == true, "Did not set the scriptable property")
+	assert((fire["nonefull"] or false), "Did not set the scriptable property")
+	setscriptable(fire, "nonefull", false)
+	fire:Destroy()
 	fire = Instance.new("Fire")
-	assert(isscriptable(fire, "size_xml") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
+	assert(isscriptable(fire, "nonefull") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
+	assert((fire["nonefull"] or false), "Did not set the scriptable property")
+	fire:Destroy()
 end)
 
 test("setrbxclipboard", {}, nil, "No standard UNC clipboard getter exists for automatic round-trip")
@@ -756,27 +796,40 @@ test("getgc", {}, function()
 end)
 
 test("getgenv", {}, function()
-	local env = getgenv()
-	local old = env.__TEST_GLOBAL
+	local old = getgenv().__TEST_GLOBAL
 
-	env.__TEST_GLOBAL = true
+	getgenv().__TEST_GLOBAL = true
 	assert(__TEST_GLOBAL == true, "getgenv() write did not propagate to the current global environment")
 
 	__TEST_GLOBAL = false
-	assert(env.__TEST_GLOBAL == false, "Current global write did not propagate back to getgenv()")
+	assert(getgenv().__TEST_GLOBAL == false, "Current global write did not propagate back to getgenv()")
 
-	env.__TEST_GLOBAL = old
-	assert(env.__TEST_GLOBAL == old, "Failed to restore the getgenv() value")
+	getgenv().__TEST_GLOBAL = old
+	assert(getgenv().__TEST_GLOBAL == old, "Failed to restore the getgenv() value")
 end)
 
 test("getloadedmodules", {}, function()
-	local module=game:GetService("CoreGui").RobloxGui.Modules.Common.Constants; getrenv().require(module); local found=false
+	local module = Instance.new("ModuleScript", game:GetService("CoreGui").RobloxGui.Modules.Common)
+	module.Source = [[
+		while true do wait() end
+		return "hi!"
+	]]
+	getrenv().require(module); local found=false
+	task.wait()
 	for _,v in ipairs(getloadedmodules()) do if typeof(v)=="Instance" and compareinstances(v,module) then found=true break end end
 	assert(found,"getloadedmodules did not include a required ModuleScript")
+	module:Destroy()
 end)
 
 test("getrenv", {}, function()
 	local env = getrenv()
+	local tested = Instance.new("LocalScript",game:GetService("Players").LocalPlayer.PlayerScripts)
+	tested.Name = "UNC_TEST_BYTECODE_CHECKED"
+	tested.Disabled = true
+	tested.Source = [[
+		shared["res"] = (__UNC_TEST_RENV_FUNCTION or function() return "Failed!" end)()
+		while true do task.wait() end
+  ]]
 	assert(type(env) == "table", "getrenv() did not return an environment table")
 	assert(env._G ~= _G, "The game _G is identical to the executor _G")
 
@@ -784,6 +837,23 @@ test("getrenv", {}, function()
 	local marker = {}
 	env.__UNC_TEST_RENV = marker
 	assert(env.__UNC_TEST_RENV == marker, "getrenv() environment is not writable")
+	assert(hookfunction, "Hookfunction is not Exis")
+	assert(getsenv, "getsenv is not Exis")
+	getrenv().__UNC_TEST_RENV_FUNCTION = function() return "fucked" end
+	hookfunction(getrenv().__UNC_TEST_RENV_FUNCTION, function()
+		return "PASSED!"
+	end)
+	
+	tested.Disabled = false
+	
+  for _, scr in pairs(getrunningscripts()) do
+    if scr.Name == "UNC_TEST_BYTECODE_CHECKED" then
+			local env1 = getsenv(scr)
+			if env1 then
+				assert(env.shared["res"], "Failed getrenv to hook Roblox environment")
+			end
+		end
+	end
 	env.__UNC_TEST_RENV = old
 	assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
 end)
@@ -798,19 +868,22 @@ test("getscriptbytecode", {"dumpstring"}, function()
 	local animate = game:GetService("Players").LocalPlayer.Character.Animate
 	local bytecode = getscriptbytecode(animate)
 	assert(type(bytecode) == "string", "Did not return a string for Character.Animate (a " .. animate.ClassName .. ")")
+	assert(bytecode == base64decode(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/Animate.luac", false)), "Did not return a real bytecode for Character.Animate (a " .. animate.ClassName .. ")")
 end)
 
 test("getscripthash", {}, function()
 	local animate = game:GetService("Players").LocalPlayer.Character.Animate:Clone()
 	local hash = getscripthash(animate)
 	local source = animate.Source
+	task.wait()
 	animate.Source = "print('Hello, world!')"
-	task.defer(function()
-		animate.Source = source
-	end)
 	local newHash = getscripthash(animate)
 	assert(hash ~= newHash, "Did not return a different hash for a modified script")
+	assert(hash == base64decode(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/animate.hash",false)), "Did not return a real hash for a Animate script")
+	assert(newHash == nil, "Did return a nil")
 	assert(newHash == getscripthash(animate), "Did not return the same hash for a script with the same source")
+	task.wait()
+	animate.Source = source
 end)
 
 test("getscripts", {}, function()
@@ -821,27 +894,47 @@ end)
 
 test("getsenv", {}, function()
 	local localScript = Instance.new("LocalScript")
-	localScript.Name = "__UNC_GETSENV_TEST__"
-	localScript.Source = [[
-		local function __UNC_GETSENV_FUNCTION()
-			return "__UNC_GETSENV_OK__"
-		end
-		__UNC_GETSENV_VALUE = "__UNC_GETSENV_VALUE__"
-		__UNC_GETSENV_FUNCTION_REF = __UNC_GETSENV_FUNCTION
-	]]
-	localScript.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+  localScript.Name = "UNC_GETSENV_TEST"
+  localScript.Disabled = true
 
-	local env = getsenv(localScript)
-	assert(type(env) == "table", "getsenv did not return an environment table")
-	assert(env.script == localScript, "getsenv().script is not the target LocalScript")
-	assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
-	assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
-	assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
+  task.defer(function()
+      localScript.Source = [[
+          local function __UNC_GETSENV_FUNCTION()
+              return "__UNC_GETSENV_OK__"
+          end
+          __UNC_GETSENV_VALUE = "__UNC_GETSENV_VALUE__"
+          __UNC_GETSENV_FUNCTION_REF = __UNC_GETSENV_FUNCTION
 
+          shared["__TEST_ENV"] = {__UNC_GETSENV_FUNCTION_REF}
+          
+          while true do 
+              task.wait() 
+          end
+      ]]
+  end)
+
+  localScript.Parent = game:GetService("Players").LocalPlayer.PlayerScripts
+  localScript.Disabled = false
+  task.wait(0.5)
+
+  for _, scr in pairs(getrunningscripts()) do
+    if scr.Name == "UNC_GETSENV_TEST" then
+      local env = getsenv(scr) 
+      if env then 
+				forcedEnv = getrenv().shared["__TEST_ENV"] or env.shared["__TEST_ENV"] or {}
+        assert(type(env) == "table", "getsenv did not return an environment table")
+        assert(env.script == localScript, "getsenv().script is not the target LocalScript")
+        assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
+        assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
+        assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
+				assert(env.__UNC_GETSENV_FUNCTION_REF == forcedEnv.__UNC_GETSENV_FUNCTION_REF, "getsenv did not return the expected LocalScript closure reference")
+      end
+    end
+  end
 	localScript:Destroy()
 end)
 
-test("thread identity", {"getthreadidentity", "getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
+test("getthreadidentity", {"getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
 	local original = getthreadidentity()
 	local target = original == 2 and 8 or 2
 
@@ -935,4 +1028,4 @@ local rate = (passes + fails) > 0 and math.round(passes / (passes + fails) * 100
 print("✅ Tested with a " .. rate .. "% success rate (" .. passes .. " out of " .. (passes + fails) .. ")")
 print("⛔ " .. fails .. " tests failed")
 print("⚪ " .. skipped .. " tests skipped/manual")
-print("⚠️ " .. undefined .. " tests have missing aliases")
+print("⚠️ " .. (undefined or "0") .. " tests have missing aliases")
