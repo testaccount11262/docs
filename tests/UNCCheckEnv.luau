@@ -1,125 +1,6 @@
-local version1 = "1.0.3"
+local version1 = "1.0.4"
 
-local url = "https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.time()
-local success, response = pcall(function()
-    return game:HttpGet(url, false)
-end)
-
-if success and response then
-    local currentVersion = response:gsub("^%s*(.-)%s*$", "%1")
-
-    if version1 ~= currentVersion then
-        print("Outdata! (Now Version: " .. version1 .. " / New Version: " .. currentVersion .. ")")
-        return
-    end
-else
-    print("Failed Load Version!")
-    return
-end
-
-local passes, fails, skipped, undefined = 0, 0, 0
-local band = bit32.band
-local bnot = bit32.bnot
-local bor  = bit32.bor
-local bxor = bit32.bxor
-local lshift = bit32.lshift
-local rshift = bit32.rshift
-local lrotate = bit32.lrotate
-
-local function add32(...)
-    local r = 0
-    for i = 1, select("#", ...) do
-        r = r + select(i, ...)
-    end
-    return r % 4294967296
-end
-
-local function bytes_to_w(str, idx)
-    return bor(
-        string.byte(str, idx) or 0,
-        lshift(string.byte(str, idx + 1) or 0, 8),
-        lshift(string.byte(str, idx + 2) or 0, 16),
-        lshift(string.byte(str, idx + 3) or 0, 24)
-    )
-end
-
-local function w_to_hex(w)
-    local s = ""
-    for i = 1, 4 do
-        s = s .. string.format("%02x", band(w, 0xff))
-        w = rshift(w, 8)
-    end
-    return s
-end
-
-local T = {}
-for i = 1, 64 do 
-    T[i] = math.floor(4294967296 * math.abs(math.sin(i))) 
-end
-
-local S = {
-    7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
-    5, 9,14,20, 5, 9,14,20, 5, 9,14,20, 5, 9,14,20,
-    4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
-    6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
-}
-
-local function custom_md5(msg: string): string
-    local len = #msg
-    local bit_len = len * 8
-    msg = msg .. string.char(128)
-    
-    while (#msg + 8) % 64 ~= 0 do 
-        msg = msg .. string.char(0) 
-    end
-    
-    for i = 1, 4 do 
-        msg = msg .. string.char(band(bit_len, 256 - 1))
-        bit_len = rshift(bit_len, 8) 
-    end
-    for i = 1, 4 do msg = msg .. string.char(0) end
-
-    local h0, h1, h2, h3 = 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
-    
-    for chunk_offset = 1, #msg, 64 do
-        local W = {}
-        for i = 0, 15 do 
-            W[i] = bytes_to_w(msg, chunk_offset + i * 4) 
-        end
-        
-        local a, b, c, d = h0, h1, h2, h3
-        local f, g
-        
-        for i = 0, 63 do
-            if i <= 15 then
-                f = bor(band(b, c), band(bnot(b), d))
-                g = i
-            elseif i <= 31 then
-                f = bor(band(d, b), band(bnot(d), c))
-                g = (5 * i + 1) % 16
-            elseif i <= 47 then
-                f = bxor(bxor(b, c), d)
-                g = (3 * i + 5) % 16
-            else
-                f = bxor(c, bor(b, bnot(d)))
-                g = (7 * i) % 16
-            end
-            
-            local temp = d
-            d = c
-            c = b
-            b = add32(b, lrotate(add32(a, f, T[i + 1], W[g]), S[i + 1]))
-            a = temp
-        end
-        
-        h0 = add32(h0, a)
-        h1 = add32(h1, b)
-        h2 = add32(h2, c)
-        h3 = add32(h3, d)
-    end
-    
-    return w_to_hex(h0) .. w_to_hex(h1) .. w_to_hex(h2) .. w_to_hex(h3)
-end
+local passes, fails, skipped, undefined = 0, 0, 0, 0
 
 print("Made by Mari gold!")
 
@@ -139,21 +20,21 @@ end
 
 local function test(name, aliases, callback, status)
 	if not getGlobal(name) then
-		fails += 1
+		fails = fails + 1
 		warn("⛔ " .. name .. " (missing)")
 	elseif status then
-		skipped += 1
+		skipped = skipped + 1
 		print("⚪ " .. name .. " • " .. status)
 	elseif not callback then
-		fails += 1
+		fails = fails + 1
 		warn("⛔ " .. name .. " (no behavioural test)")
 	else
 		local success, message = pcall(callback)
 		if success then
-			passes += 1
+			passes = passes + 1
 			print("✅ " .. name .. (message and " • " .. message or ""))
 		else
-			fails += 1
+			fails = fails + 1
 			warn("⛔ " .. name .. " failed: " .. tostring(message))
 		end
 	end
@@ -162,7 +43,7 @@ local function test(name, aliases, callback, status)
 		if getGlobal(alias)==nil then table.insert(missing,alias) end
 	end
 	if #missing>0 then
-		undefined+=1
+		undefined = undefined + 1
 		warn("⚠️ "..table.concat(missing,", "))
 	end
 end
@@ -460,15 +341,15 @@ test("debug.getproto", {}, function()
 	assert(type(list) == "table" and type(list[1]) == "function", "getproto did not return the inner closure")
 	assert(list[1]() == "UNC_PROTO_1", "getproto returned a non-functional closure")
 	local raw = debug.getproto(test, 1, false)
-    if typeof(raw) == "ProtoProxy" then
-        for i, const in ipairs(debug.getconstants(raw)) do
-            assert((i == 1 and const == "UNC_PROTO_1"), "ProtoProxy is not a return real values")
-        end
-	    assert(typeof(raw) == "ProtoProxy", "getproto(..., false) did not return a ProtoProxy")
-    elseif type(raw) == "function" then
-        assert(raw() == "UNC_PROTO_1", "getproto(..., false) did not return a real value")
-        assert(type(raw) == "function", "getproto(..., false) did not return a function")
-    end
+	if typeof(raw) == "ProtoProxy" then
+		for i, const in ipairs(debug.getconstants(raw)) do
+			assert((i == 1 and const == "UNC_PROTO_1"), "ProtoProxy is not a return real values")
+		end
+		assert(typeof(raw) == "ProtoProxy", "getproto(..., false) did not return a ProtoProxy")
+	elseif type(raw) == "function" then
+		assert(raw() == "UNC_PROTO_1", "getproto(..., false) did not return a real value")
+		assert(type(raw) == "function", "getproto(..., false) did not return a function")
+	end
 end)
 
 test("debug.getprotos", {}, function()
@@ -642,6 +523,10 @@ test("isrbxactive", {"isgameactive"}, function()
 	assert(type(isrbxactive()) == "boolean", "Did not return a boolean value")
 end)
 
+if not gethui then
+	function gethui() return game:GetService("Players").LocalPlayer.PlayerGui end
+end
+
 -- 1. 테스트용 공통 UI 생성 (재활용)
 local gui = Instance.new("ScreenGui")
 gui.IgnoreGuiInset = true
@@ -661,176 +546,161 @@ task.wait(0.2)
 local btnX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
 local btnY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
 
-mousemoveabs(btnX + 1, btnY + 1)
-mousemoveabs(btnX, btnY)
+if mousemoveabs then
+	mousemoveabs(btnX + 1, btnY + 1)
+	mousemoveabs(btnX, btnY)
+end
 task.wait(0.5)
 
 test("mouse1click", {}, function()
-    local clicked = false
-    local conn = button.MouseButton1Click:Connect(function()
-        clicked = true
-    end)
+	local clicked = false
+	local conn = button.MouseButton1Click:Connect(function()
+		clicked = true
+	end)
 
-    task.wait(0.2)
+	task.wait(0.2)
 
-    mouse1click()
-    task.wait(0.2)
-    mouse1click()
+	mouse1click()
+	task.wait(0.2)
+	mouse1click()
 
-    task.wait(0.2)
+	task.wait(0.2)
 
-    assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
+	assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
 end)
 
 -- [1] mouse1press (누른 뒤 반드시 mouse1release로 해제)
 test("mouse1press", {}, function()
-    local pressed = false
-    local conn = button.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            pressed = true
-        end
-    end)
+	local pressed = false
+	local conn = button.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			pressed = true
+		end
+	end)
 
-    mouse1press()
-    task.wait(0.1)
-    
-    -- [핵심] 누름 확인 후 다음 동작을 위해 즉시 해제
-    mouse1release()
-    conn:Disconnect()
+	mouse1press()
+	task.wait(0.1)
 
-    assert(pressed, "mouse1press가 버튼 누름 이벤트를 감지하지 못했습니다.")
+	mouse1release()
+	conn:Disconnect()
+
+	assert(pressed, "mouse1press did not activate the GUI button at the cursor position.")
 end)
 
 
 -- [2] mouse1release
 test("mouse1release", {}, function()
-    local released = false
-    local conn = button.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            released = true
-        end
-    end)
+	local released = false
+	local conn = button.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			released = true
+		end
+	end)
 
-    mouse1press()
-    task.wait(0.05)
-    mouse1release()
-    task.wait(0.1)
+	mouse1press()
+	task.wait(0.05)
+	mouse1release()
+	task.wait(0.1)
 
-    conn:Disconnect()
+	conn:Disconnect()
 
-    assert(released, "mouse1release가 떼기 이벤트를 감지하지 못했습니다.")
-end)
-
-
--- [3] mouse1click
-test("mouse1click", {}, function()
-    local clicked = false
-    local conn = button.MouseButton1Click:Connect(function()
-        clicked = true
-    end)
-
-    mouse1click()
-    task.wait(0.1)
-
-    conn:Disconnect()
-
-    assert(clicked, "mouse1click이 클릭 이벤트를 감지하지 못했습니다.")
+	assert(released, "mouse1release did not release the GUI button at the cursor position.")
 end)
 
 
 -- [4] mouse2press
 test("mouse2press", {}, function()
-    local pressed = false
-    local conn = button.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton2 then
-            pressed = true
-        end
-    end)
+	local pressed = false
+	local conn = button.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			pressed = true
+		end
+	end)
 
-    mouse2press()
-    task.wait(0.1)
-    
-    -- 우클릭 누름 해제
-    mouse2release()
-    conn:Disconnect()
+	mouse2press()
+	task.wait(0.1)
 
-    assert(pressed, "mouse2press가 우클릭 누름 이벤트를 감지하지 못했습니다.")
+	-- 우클릭 누름 해제
+	mouse2release()
+	conn:Disconnect()
+
+	assert(pressed, "mouse2press did not activate the GUI button at the cursor position.")
 end)
 
 
 -- [5] mouse2release
 test("mouse2release", {}, function()
-    local released = false
-    local conn = button.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton2 then
-            released = true
-        end
-    end)
+	local released = false
+	local conn = button.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			released = true
+		end
+	end)
 
-    mouse2press()
-    task.wait(0.05)
-    mouse2release()
-    task.wait(0.1)
+	mouse2press()
+	task.wait(0.05)
+	mouse2release()
+	task.wait(0.1)
 
-    conn:Disconnect()
+	conn:Disconnect()
 
-    assert(released, "mouse2release가 우클릭 떼기 이벤트를 감지하지 못했습니다.")
+	assert(released, "mouse2release did not release the GUI button at the cursor position.")
 end)
 
 
 -- [6] mouse2click
 test("mouse2click", {}, function()
-    local clicked = false
-    local conn = button.MouseButton2Click:Connect(function()
-        clicked = true
-    end)
+	local clicked = false
+	local conn = button.MouseButton2Click:Connect(function()
+		clicked = true
+	end)
 
-    mouse2click()
-    task.wait(0.1)
+	mouse2click()
+	task.wait(0.1)
 
-    conn:Disconnect()
+	conn:Disconnect()
 
-    assert(clicked, "mouse2click이 우클릭 이벤트를 감지하지 못했습니다.")
+	assert(clicked, "mouse2click did not activate the GUI button at the cursor position.")
 end)
 
 button:Destroy()
 gui:Destroy()
 
 test("mousescroll", {}, function()
-    local gui = Instance.new("ScreenGui")
-    gui.IgnoreGuiInset = true
-    gui.Parent = gethui()
-    
-    local frame = Instance.new("ScrollingFrame")
-    frame.Size = UDim2.fromOffset(300, 300)
-    frame.Position = UDim2.fromOffset(100, 100)
-    frame.CanvasSize = UDim2.fromOffset(300, 2000)
-    frame.Active = true
-    frame.Selectable = true
-    frame.Parent = gui
+	local gui = Instance.new("ScreenGui")
+	gui.IgnoreGuiInset = true
+	gui.Parent = gethui()
 
-    task.wait(0.1)
+	local frame = Instance.new("ScrollingFrame")
+	frame.Size = UDim2.fromOffset(300, 300)
+	frame.Position = UDim2.fromOffset(100, 100)
+	frame.CanvasSize = UDim2.fromOffset(300, 2000)
+	frame.Active = true
+	frame.Selectable = true
+	frame.Parent = gui
 
-    local targetX = frame.AbsolutePosition.X + (frame.AbsoluteSize.X / 2)
-    local targetY = frame.AbsolutePosition.Y + (frame.AbsoluteSize.Y / 2)
-    mousemoveabs(targetX, targetY)
+	task.wait(0.1)
 
-    task.wait(0.2)
+	local targetX = frame.AbsolutePosition.X + (frame.AbsoluteSize.X / 2)
+	local targetY = frame.AbsolutePosition.Y + (frame.AbsoluteSize.Y / 2)
+	mousemoveabs(targetX, targetY)
 
-    frame.CanvasPosition = Vector2.new(0, 500)
-    task.wait(0.1)
-    
-    local before = frame.CanvasPosition.Y
+	task.wait(0.2)
 
-    mousescroll(-120)
-    task.wait(0.1)
+	frame.CanvasPosition = Vector2.new(0, 500)
+	task.wait(0.1)
 
-    local after = frame.CanvasPosition.Y
+	local before = frame.CanvasPosition.Y
 
-    frame:Destroy()
-    gui:Destroy()
+	mousescroll(-120)
+	task.wait(0.1)
 
-    assert(after ~= before, string.format("mousescroll이 동작하지 않았습니다. (전: %d, 후: %d)", before, after))
+	local after = frame.CanvasPosition.Y
+
+	frame:Destroy()
+	gui:Destroy()
+
+	assert(after ~= before, string.format("mousescroll did not scroll the GUI at the cursor position. (before: %d, atfer: %d)", before, after))
 end)
 
 test("fireclickdetector", {}, function()
@@ -849,7 +719,7 @@ end)
 
 test("getconnections", {}, function()
 	local bindable=Instance.new("BindableEvent"); 
-    local fired=false
+	local fired=false
 	bindable.Event:Connect(function() fired=true end)
 	local connections=getconnections(bindable.Event)
 	assert(type(connections)=="table" and #connections>0,"getconnections returned no connections")
@@ -910,15 +780,15 @@ test("setscriptable", {}, function()
 	local fire = Instance.new("Fire")
 	local wasScriptable = setscriptable(fire, "nonefull", true)
 	task.wait()
-    assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
+	assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
 	assert(isscriptable(fire, "nonefull") == true, "Did not set the scriptable property")
 	assert((fire["nonefull"] or false), "Did not set the scriptable property")
 	setscriptable(fire, "nonefull", false)
 	task.wait()
-    fire:Destroy()
+	fire:Destroy()
 	fire = Instance.new("Fire")
 	task.wait()
-    assert(isscriptable(fire, "nonefull") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
+	assert(isscriptable(fire, "nonefull") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
 	assert((fire["nonefull"] or true), "Did not set the scriptable property")
 	fire:Destroy()
 end)
@@ -1007,29 +877,29 @@ test("lz4decompress", {}, function()
 end)
 
 test("queue_on_teleport", {"queueonteleport"}, function()
-    if (shared["queue_on_teleport_tested"] or false) then
-        shared["queue_on_teleport_tested"] = false
-        return
-    end
-    if (shared["a_queue_on_teleport_tested"] or false) then
-        assert(false, "queue_on_teleport is not worked!")
-    end
-    shared["a_queue_on_teleport_tested"] = true
-    local TeleportService = game:GetService("TeleportService")
-    local Players = game:GetService("Players")
-    local LocalPlayer = Players.LocalPlayer
-    queue_on_teleport([[
+	if (shared["queue_on_teleport_tested"] or false) then
+		shared["queue_on_teleport_tested"] = false
+		return
+	end
+	if (shared["a_queue_on_teleport_tested"] or false) then
+		assert(false, "queue_on_teleport is not worked!")
+	end
+	shared["a_queue_on_teleport_tested"] = true
+	local TeleportService = game:GetService("TeleportService")
+	local Players = game:GetService("Players")
+	local LocalPlayer = Players.LocalPlayer
+	queue_on_teleport([[
         shared["queue_on_teleport_tested"] = true
         shared["a_queue_on_teleport_tested"] = false
         loadstring(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau?=" .. os.date(), false))()
     ]])
-    task.wait(1)
-    if #Players:GetPlayers() <= 1 then
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-    else
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-    end
-    assert(false, "Queue_on_teleport is testing!")
+	task.wait(1)
+	if #Players:GetPlayers() <= 1 then
+		TeleportService:Teleport(game.PlaceId, LocalPlayer)
+	else
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+	end
+	assert(false, "Queue_on_teleport is testing!")
 end)
 
 test("request", {"http.request", "http_request"}, function()
@@ -1047,7 +917,7 @@ test("setfpscap", {}, function()
 	local heartbeat = game:GetService("RunService").Heartbeat
 	local function measure(seconds)
 		local frames, started = 0, os.clock()
-		while os.clock() - started < seconds do heartbeat:Wait(); frames += 1 end
+		while os.clock() - started < seconds do heartbeat:Wait(); frames = frames + 1 end
 		return frames / math.max(os.clock() - started, 0.001)
 	end
 	local oldCap
@@ -1074,7 +944,7 @@ test("getgenv", {}, function()
 	local old = getgenv().__TEST_GLOBAL
 
 	getgenv().__TEST_GLOBAL = true
-    task.wait()
+	task.wait()
 	assert(__TEST_GLOBAL == true, "getgenv() write did not propagate to the current global environment")
 
 	getgenv().__TEST_GLOBAL = old
@@ -1083,16 +953,16 @@ end)
 
 test("getloadedmodules", {}, function()
 	local module = game:GetService("ReplicatedStorage").ModuleScript
-    task.wait()
+	task.wait()
 	getrenv().require(module); 
-    local found=false
+	local found=false
 	task.wait()
 	for _,v in ipairs(getloadedmodules()) do 
-        if typeof(v)=="Instance" and compareinstances(v,module) then 
-            found=true 
-            break 
-        end 
-    end
+		if typeof(v)=="Instance" and compareinstances(v,module) then 
+			found=true 
+			break 
+		end 
+	end
 	assert(found,"getloadedmodules did not include a required ModuleScript")
 	module:Destroy()
 end)
@@ -1100,11 +970,6 @@ end)
 test("getrenv", {}, function()
 	local env = getrenv()
 	local tested = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_TEST_BYTECODE_CHECKED
-	tested.Disabled = true
-	tested.Source = [[
-		shared["res"] = (__UNC_TEST_RENV_FUNCTION or function() return "Failed!" end)()
-		while true do task.wait() end
-  ]]
 	assert(type(env) == "table", "getrenv() did not return an environment table")
 	assert(env._G ~= _G, "The game _G is identical to the executor _G")
 
@@ -1118,19 +983,20 @@ test("getrenv", {}, function()
 	hookfunction(getrenv().__UNC_TEST_RENV_FUNCTION, function()
 		return "PASSED!"
 	end)
-	
+
 	tested.Disabled = false
-	
-    for _, scr in pairs(getrunningscripts()) do
-        if scr.Name == "UNC_TEST_BYTECODE_CHECKED" then
-            local env1 = getsenv(scr)
-            if env1 then
-                assert(env.shared["res"], "Failed getrenv to hook Roblox environment")
-            end
-        end
-    end
-    env.__UNC_TEST_RENV = old
-    assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
+
+	for _, scr in pairs(getrunningscripts()) do
+		if scr.Name == "UNC_TEST_BYTECODE_CHECKED" then
+			local env1 = getsenv(scr)
+			if env1 then
+				assert(env.shared["res"], "Failed getrenv to hook Roblox environment")
+			end
+		end
+	end
+	tested.Disabled = true
+	env.__UNC_TEST_RENV = old
+	assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
 end)
 
 test("getrunningscripts", {}, function()
@@ -1150,7 +1016,7 @@ local function checkScriptPattern(sourceCode)
 	local code = sourceCode:gsub("%-%-%[%[.-%]%]", ""):gsub("%-%-[^\n]*", "")
 
 	local scriptVars = { ["script"] = true }
-	
+
 	local foundNewVar = true
 	while foundNewVar do
 		foundNewVar = false
@@ -1212,23 +1078,24 @@ end)
 
 test("getsenv", {}, function()
 	local localScript = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_GETSENV_TEST
-    task.wait(0.5)
+	tested.Disabled = false
+	task.wait(0.5)
 
-    for _, scr in pairs(getrunningscripts()) do
-    if scr.Name == "UNC_GETSENV_TEST" then
-        local env = getsenv(scr) 
-        if env then 
-                forcedEnv = getrenv().shared["__TEST_ENV"] or env.shared["__TEST_ENV"] or {}
-        assert(type(env) == "table", "getsenv did not return an environment table")
-        assert(env.script == localScript, "getsenv().script is not the target LocalScript")
-        assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
-        assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
-        assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
-                assert(env.__UNC_GETSENV_FUNCTION_REF == forcedEnv.__UNC_GETSENV_FUNCTION_REF, "getsenv did not return the expected LocalScript closure reference")
-        end
-    end
-    end
-	localScript:Destroy()
+	for _, scr in pairs(getrunningscripts()) do
+		if scr.Name == "UNC_GETSENV_TEST" then
+			local env = getsenv(scr) 
+			if env then 
+				forcedEnv = getrenv().shared["__TEST_ENV"] or env.shared["__TEST_ENV"] or {}
+				assert(type(env) == "table", "getsenv did not return an environment table")
+				assert(env.script == localScript, "getsenv().script is not the target LocalScript")
+				assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
+				assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
+				assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
+				assert(env.__UNC_GETSENV_FUNCTION_REF == forcedEnv.__UNC_GETSENV_FUNCTION_REF, "getsenv did not return the expected LocalScript closure reference")
+			end
+		end
+	end
+	tested.Disabled = true
 end)
 
 test("getthreadidentity", {"getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
@@ -1327,59 +1194,7 @@ print("⛔ " .. fails .. " tests failed")
 print("⚪ " .. skipped .. " tests skipped/manual")
 print("⚠️ " .. (undefined or "0") .. " tests have missing aliases")
 
-local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-local function base64encode(data: string): string
-    local result = {}
-    local len = #data
-    local i = 1
-
-    while i <= len do
-        local b1 = string.byte(data, i) or 0
-        local b2 = string.byte(data, i + 1) or 0
-        local b3 = string.byte(data, i + 2) or 0
-        
-        local n = bit32.lshift(b1, 16) + bit32.lshift(b2, 8) + b3
-
-        local c1 = bit32.extract(n, 18, 6) + 1
-        local c2 = bit32.extract(n, 12, 6) + 1
-        local c3 = bit32.extract(n, 6, 6) + 1
-        local c4 = bit32.extract(n, 0, 6) + 1
-
-        table.insert(result, string.sub(chars, c1, c1))
-        table.insert(result, string.sub(chars, c2, c2))
-        
-        if i + 1 <= len then
-            table.insert(result, string.sub(chars, c3, c3))
-        else
-            table.insert(result, "=")
-        end
-        
-        if i + 2 <= len then
-            table.insert(result, string.sub(chars, c4, c4))
-        else
-            table.insert(result, "=")
-        end
-
-        i = i + 3
-    end
-
-    return table.concat(result)
-end
-
-local charset = "1234567890"
-
-function random(length)
-    math.randomseed(os.time())
-    if length > 0 then
-        return random(length - 1) .. charset:sub(math.random(1, #charset), 1)
-    else
-        return ""
-    end
-end
-
 print("Made By Mari Gold!")
-print(base64encode(string.sub(identifyexecutor(), 1, 3) .. version1 .. custom_md5(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau?t=" .. os.date(), false) .. " " .. random(1))))
 
 shared["queue_on_teleport_tested"] = false
 shared["a_queue_on_teleport_tested"] = nil
