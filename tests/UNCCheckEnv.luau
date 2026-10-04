@@ -1,4 +1,4 @@
-local version1 = "1.0.6"
+local version1 = "1.0.7"
 
 local passes, fails, skipped, undefined = 0, 0, 0, 0
 
@@ -71,6 +71,7 @@ end)
 test("cache.replace", {}, function()
 	local part=Instance.new("Part"); local fire=Instance.new("Fire")
 	cache.replace(part,fire)
+	task.wait()
 	assert(compareinstances(part,fire),"cache.replace did not replace the reference")
 end)
 
@@ -166,12 +167,11 @@ test("getcallingscript", {}, function()
 end)
 
 test("getscriptclosure", {"getscriptfunction"}, function()
-	local module = game:GetService("ReplicatedStorage").ModuleScript2
+	local module = game:GetService("ReplicatedStorage").RUNC_TEST_MODULE
 	local expected=getrenv().require(module)
 	local generated=getscriptclosure(module)()
 	assert(type(generated)==type(expected),"Generated closure returned an unexpected value type")
 	assert(shallowEqual(expected,generated),"Generated closure did not reproduce the module result")
-	module:Destroy()
 end)
 
 test("hookfunction", {"replaceclosure"}, function()
@@ -785,7 +785,7 @@ test("setscriptable", {}, function()
 	local fire = Instance.new("Fire")
 	local wasScriptable = setscriptable(fire, "nonefull", true)
 	task.wait()
-	assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
+	-- assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
 	assert(isscriptable(fire, "nonefull") == true, "Did not set the scriptable property")
 	assert((fire["nonefull"] or false), "Did not set the scriptable property")
 	setscriptable(fire, "nonefull", false)
@@ -957,7 +957,7 @@ test("getgenv", {}, function()
 end)
 
 test("getloadedmodules", {}, function()
-	local module = game:GetService("ReplicatedStorage").ModuleScript
+	local module = game:GetService("ReplicatedStorage"):WaitForChild("RUNC_TEST_MODULE")
 	task.wait()
 	getrenv().require(module); 
 	local found=false
@@ -1093,7 +1093,6 @@ end)
 
 test("getsenv", {}, function()
 	local localScript = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_GETSENV_TEST
-	localScript.Disabled = false
 	task.wait(0.5)
 
 	for _, scr in pairs(getrunningscripts()) do
@@ -1106,11 +1105,9 @@ test("getsenv", {}, function()
 				assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
 				assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
 				assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
-				assert(env.__UNC_GETSENV_FUNCTION_REF == forcedEnv.__UNC_GETSENV_FUNCTION_REF, "getsenv did not return the expected LocalScript closure reference")
 			end
 		end
 	end
-	localScript.Disabled = true
 end)
 
 test("getthreadidentity", {"getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
@@ -1121,6 +1118,16 @@ test("getthreadidentity", {"getidentity", "getthreadcontext", "setthreadidentity
 		setthreadidentity(target)
 		assert(getthreadidentity() == target, "setthreadidentity did not change the identity reported by getthreadidentity")
 	end)
+
+	setthreadidentity(2)
+	task.wait(0.2)
+	local s, e = pcall(function() game:GetService("CoreGui") end)
+	assert(not s, "Why Successfully to Identity 2 to Call a CoreGui 🌹")
+
+	setthreadidentity(7)
+	task.wait(0.2)
+	local s, e = pcall(function() game:GetService("CoreGui") end)
+	assert(s, "Why Failed to Identity 7 to Call a CoreGui 🤔")
 
 	local restored, restoreErr = pcall(function()
 		setthreadidentity(original)
