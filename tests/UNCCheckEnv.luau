@@ -1,7 +1,10 @@
-local version1 = "1.0.1"
+local version1 = "1.0.2"
+print(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.date(), false))
 if version1 ~= game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.date(), false) then
 	print("Outdata!")
+    return
 end
+
 local passes, fails, skipped, undefined = 0, 0, 0
 local band = bit32.band
 local bnot = bit32.bnot
