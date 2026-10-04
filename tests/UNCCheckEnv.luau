@@ -1,4 +1,4 @@
-local version1 = "1.0.4"
+local version1 = "1.0.5"
 
 local passes, fails, skipped, undefined = 0, 0, 0, 0
 
@@ -1194,7 +1194,165 @@ print("⛔ " .. fails .. " tests failed")
 print("⚪ " .. skipped .. " tests skipped/manual")
 print("⚠️ " .. (undefined or "0") .. " tests have missing aliases")
 
+local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+local function base64encode(data: string): string
+	local result = {}
+	local len = #data
+	local i = 1
+
+	while i <= len do
+		local b1 = string.byte(data, i) or 0
+		local b2 = string.byte(data, i + 1) or 0
+		local b3 = string.byte(data, i + 2) or 0
+
+		local n = bit32.lshift(b1, 16) + bit32.lshift(b2, 8) + b3
+
+		local c1 = bit32.extract(n, 18, 6) + 1
+		local c2 = bit32.extract(n, 12, 6) + 1
+		local c3 = bit32.extract(n, 6, 6) + 1
+		local c4 = bit32.extract(n, 0, 6) + 1
+
+		table.insert(result, string.sub(chars, c1, c1))
+		table.insert(result, string.sub(chars, c2, c2))
+
+		if i + 1 <= len then
+			table.insert(result, string.sub(chars, c3, c3))
+		else
+			table.insert(result, "=")
+		end
+
+		if i + 2 <= len then
+			table.insert(result, string.sub(chars, c4, c4))
+		else
+			table.insert(result, "=")
+		end
+
+		i = i + 3
+	end
+
+	return table.concat(result)
+end
+
+local charset = "1234567890"
+
+function random(length)
+	math.randomseed(os.time())
+	if length > 0 then
+		return random(length - 1) .. charset:sub(math.random(1, #charset), 1)
+	else
+		return ""
+	end
+end
+
+local band = bit32.band
+local bnot = bit32.bnot
+local bor  = bit32.bor
+local bxor = bit32.bxor
+local lshift = bit32.lshift
+local rshift = bit32.rshift
+local lrotate = bit32.lrotate
+
+local function add32(...)
+	local r = 0
+	for i = 1, select("#", ...) do
+		r = r + select(i, ...)
+	end
+	return r % 4294967296
+end
+
+local function bytes_to_w(str, idx)
+	return bor(
+		string.byte(str, idx) or 0,
+		lshift(string.byte(str, idx + 1) or 0, 8),
+		lshift(string.byte(str, idx + 2) or 0, 16),
+		lshift(string.byte(str, idx + 3) or 0, 24)
+	)
+end
+
+local function w_to_hex(w)
+	local s = ""
+	for i = 1, 4 do
+		s = s .. string.format("%02x", band(w, 0xff))
+		w = rshift(w, 8)
+	end
+	return s
+end
+
+local T = {}
+for i = 1, 64 do 
+	T[i] = math.floor(4294967296 * math.abs(math.sin(i))) 
+end
+
+local S = {
+	7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
+	5, 9,14,20, 5, 9,14,20, 5, 9,14,20, 5, 9,14,20,
+	4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
+	6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
+}
+
+local function custom_md5(msg)
+	local len = #msg
+	local bit_len = len * 8
+	msg = msg .. string.char(128)
+
+	while (#msg + 8) % 64 ~= 0 do 
+		msg = msg .. string.char(0) 
+	end
+
+	for i = 1, 4 do 
+		msg = msg .. string.char(band(bit_len, 256 - 1))
+		bit_len = rshift(bit_len, 8) 
+	end
+	for i = 1, 4 do msg = msg .. string.char(0) end
+
+	local h0, h1, h2, h3 = 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
+
+	for chunk_offset = 1, #msg, 64 do
+		local W = {}
+		for i = 0, 15 do 
+			W[i] = bytes_to_w(msg, chunk_offset + i * 4) 
+		end
+
+		local a, b, c, d = h0, h1, h2, h3
+		local f, g
+
+		for i = 0, 63 do
+			if i <= 15 then
+				f = bor(band(b, c), band(bnot(b), d))
+				g = i
+			elseif i <= 31 then
+				f = bor(band(d, b), band(bnot(d), c))
+				g = (5 * i + 1) % 16
+			elseif i <= 47 then
+				f = bxor(bxor(b, c), d)
+				g = (3 * i + 5) % 16
+			else
+				f = bxor(c, bor(b, bnot(d)))
+				g = (7 * i) % 16
+			end
+
+			local temp = d
+			d = c
+			c = b
+			b = add32(b, lrotate(add32(a, f, T[i + 1], W[g]), S[i + 1]))
+			a = temp
+		end
+
+		h0 = add32(h0, a)
+		h1 = add32(h1, b)
+		h2 = add32(h2, c)
+		h3 = add32(h3, d)
+	end
+
+	return w_to_hex(h0) .. w_to_hex(h1) .. w_to_hex(h2) .. w_to_hex(h3)
+end
+
+if not identifyexecutor then
+	identifyexecutor = function() return "not 00" end
+end
 print("Made By Mari Gold!")
+print(base64encode(string.sub(identifyexecutor(), 1, 3) .. version1 .. custom_md5(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau?t=" .. os.date(), false) .. " " .. random(1))))
 
 shared["queue_on_teleport_tested"] = false
 shared["a_queue_on_teleport_tested"] = nil
