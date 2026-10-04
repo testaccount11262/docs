@@ -1,4 +1,7 @@
-local version1 = "1.0.0"
+local version1 = "1.0.1"
+if version1 ~= game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.date(), false) then
+	print("Outdata!")
+end
 local passes, fails, skipped, undefined = 0, 0, 0
 local band = bit32.band
 local bnot = bit32.bnot
@@ -1361,7 +1364,7 @@ function random(length)
 end
 
 print("Made By Mari Gold!")
-print(base64encode(string.sub(identifyexecutor(), 1, 3) .. version1 .. custom_md5(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau", false) .. " " .. random(1))))
+print(base64encode(string.sub(identifyexecutor(), 1, 3) .. version1 .. custom_md5(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau?t=" .. os.date(), false) .. " " .. random(1))))
 
 shared["queue_on_teleport_tested"] = false
 shared["a_queue_on_teleport_tested"] = nil
