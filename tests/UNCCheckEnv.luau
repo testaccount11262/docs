@@ -638,26 +638,21 @@ button.Active = true
 button.Selectable = true
 button.Parent = gui
 
--- UI 렌더링 및 위치 확정 대기
 task.wait(0.2)
 
 local btnX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
 local btnY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
 
+mousemoveabs(btnX + 1, btnY + 1)
+mousemoveabs(btnX, btnY)
+task.wait(0.5)
+
 test("mouse1click", {}, function()
     local clicked = false
-    local conn = button.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            clicked = true
-        end
+    local conn = button.MouseButton1Click:Connect(function()
+        clicked = true
     end)
 
-    task.wait(0.2)
-
-    local targetX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
-    local targetY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
-    
-    mousemoveabs(targetX, targetY)
     task.wait(0.2)
 
     mouse1click()
@@ -677,9 +672,6 @@ test("mouse1press", {}, function()
             pressed = true
         end
     end)
-
-    mousemoveabs(btnX, btnY)
-    task.wait(0.1)
 
     mouse1press()
     task.wait(0.1)
@@ -701,9 +693,6 @@ test("mouse1release", {}, function()
         end
     end)
 
-    mousemoveabs(btnX, btnY)
-    task.wait(0.1)
-
     mouse1press()
     task.wait(0.05)
     mouse1release()
@@ -722,9 +711,6 @@ test("mouse1click", {}, function()
         clicked = true
     end)
 
-    mousemoveabs(btnX, btnY)
-    task.wait(0.1)
-
     mouse1click()
     task.wait(0.1)
 
@@ -742,9 +728,6 @@ test("mouse2press", {}, function()
             pressed = true
         end
     end)
-
-    mousemoveabs(btnX, btnY)
-    task.wait(0.1)
 
     mouse2press()
     task.wait(0.1)
@@ -766,9 +749,6 @@ test("mouse2release", {}, function()
         end
     end)
 
-    mousemoveabs(btnX, btnY)
-    task.wait(0.1)
-
     mouse2press()
     task.wait(0.05)
     mouse2release()
@@ -786,9 +766,6 @@ test("mouse2click", {}, function()
     local conn = button.MouseButton2Click:Connect(function()
         clicked = true
     end)
-
-    mousemoveabs(btnX, btnY)
-    task.wait(0.1)
 
     mouse2click()
     task.wait(0.1)
