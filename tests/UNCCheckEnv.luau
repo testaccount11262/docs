@@ -624,23 +624,32 @@ test("isrbxactive", {"isgameactive"}, function()
 	assert(type(isrbxactive()) == "boolean", "Did not return a boolean value")
 end)
 
-test("mouse1click", {}, function()
-    local gui = Instance.new("ScreenGui")
-    gui.IgnoreGuiInset = true
-    gui.ResetOnSpawn = false
-    gui.Parent = gethui()
-    
-    local button = Instance.new("TextButton")
-    button.Size = UDim2.fromOffset(200, 200)
-    button.Position = UDim2.fromOffset(200, 200)
-    button.Text = "UNC_MOUSE_CLICK"
-    button.Active = true
-    button.Selectable = true
-    button.Parent = gui
+-- 1. 테스트용 공통 UI 생성 (재활용)
+local gui = Instance.new("ScreenGui")
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Parent = gethui()
 
+local button = Instance.new("TextButton")
+button.Size = UDim2.fromOffset(200, 200)
+button.Position = UDim2.fromOffset(100, 100)
+button.Text = "UNC MOUSE TEST"
+button.Active = true
+button.Selectable = true
+button.Parent = gui
+
+-- UI 렌더링 및 위치 확정 대기
+task.wait(0.2)
+
+local btnX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
+local btnY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
+
+test("mouse1click", {}, function()
     local clicked = false
-    button.MouseButton1Click:Connect(function() 
-        clicked = true 
+    local conn = button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            clicked = true
+        end
     end)
 
     -- UI 배치 및 AbsolutePosition 확정까지 충분히 대기
@@ -663,27 +672,6 @@ test("mouse1click", {}, function()
 
     assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
 end)
-
--- 1. 테스트용 공통 UI 생성 (재활용)
-local gui = Instance.new("ScreenGui")
-gui.IgnoreGuiInset = true
-gui.ResetOnSpawn = false
-gui.Parent = gethui()
-
-local button = Instance.new("TextButton")
-button.Size = UDim2.fromOffset(200, 200)
-button.Position = UDim2.fromOffset(100, 100)
-button.Text = "UNC MOUSE TEST"
-button.Active = true
-button.Selectable = true
-button.Parent = gui
-
--- UI 렌더링 및 위치 확정 대기
-task.wait(0.2)
-
-local btnX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
-local btnY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
-
 
 -- [1] mouse1press (누른 뒤 반드시 mouse1release로 해제)
 test("mouse1press", {}, function()
@@ -1042,7 +1030,7 @@ test("queue_on_teleport", {"queueonteleport"}, function()
     queue_on_teleport([[
         shared["queue_on_teleport_tested"] = true
         shared["a_queue_on_teleport_tested"] = false
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau", false))()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau?=" .. os.date(), false))()
     ]])
     task.wait(1)
     if #Players:GetPlayers() <= 1 then
@@ -1401,3 +1389,6 @@ end
 
 print("Made By Mari Gold!")
 print(base64encode(string.sub(identifyexecutor(), 1, 3) .. version1 .. custom_md5(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau", false) .. " " .. random(1))))
+
+shared["queue_on_teleport_tested"] = false
+shared["a_queue_on_teleport_tested"] = nil
