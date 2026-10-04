@@ -1028,18 +1028,20 @@ test("lz4decompress", {}, function()
 end)
 
 test("queue_on_teleport", {"queueonteleport"}, function()
-    if shared["a_queue_on_teleport_tested"] then
+    if (shared["queue_on_teleport_tested"] or false) then
+        shared["queue_on_teleport_tested"] = false
+        return
+    end
+    if (shared["a_queue_on_teleport_tested"] or false) then
         assert(false, "queue_on_teleport is not worked!")
     end
     shared["a_queue_on_teleport_tested"] = true
-    if shared["queue_on_teleport_tested"] then
-        return
-    end
     local TeleportService = game:GetService("TeleportService")
     local Players = game:GetService("Players")
     local LocalPlayer = Players.LocalPlayer
     queue_on_teleport([[
         shared["queue_on_teleport_tested"] = true
+        shared["a_queue_on_teleport_tested"] = false
         loadstring(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau", false))()
     ]])
     task.wait(1)
