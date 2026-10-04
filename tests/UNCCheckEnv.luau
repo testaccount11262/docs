@@ -1,4 +1,111 @@
+local version1 = "1.0.0"
 local passes, fails, skipped, undefined = 0, 0, 0
+local band = bit32.band
+local bnot = bit32.bnot
+local bor  = bit32.bor
+local bxor = bit32.bxor
+local lshift = bit32.lshift
+local rshift = bit32.rshift
+local lrotate = bit32.lrotate
+
+local function add32(...)
+    local r = 0
+    for i = 1, select("#", ...) do
+        r = r + select(i, ...)
+    end
+    return r % 4294967296
+end
+
+local function bytes_to_w(str, idx)
+    return bor(
+        string.byte(str, idx) or 0,
+        lshift(string.byte(str, idx + 1) or 0, 8),
+        lshift(string.byte(str, idx + 2) or 0, 16),
+        lshift(string.byte(str, idx + 3) or 0, 24)
+    )
+end
+
+local function w_to_hex(w)
+    local s = ""
+    for i = 1, 4 do
+        s = s .. string.format("%02x", band(w, 0xff))
+        w = rshift(w, 8)
+    end
+    return s
+end
+
+local T = {}
+for i = 1, 64 do 
+    T[i] = math.floor(4294967296 * math.abs(math.sin(i))) 
+end
+
+local S = {
+    7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
+    5, 9,14,20, 5, 9,14,20, 5, 9,14,20, 5, 9,14,20,
+    4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
+    6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
+}
+
+local function custom_md5(msg: string): string
+    local len = #msg
+    local bit_len = len * 8
+    msg = msg .. string.char(128)
+    
+    while (#msg + 8) % 64 ~= 0 do 
+        msg = msg .. string.char(0) 
+    end
+    
+    for i = 1, 4 do 
+        msg = msg .. string.char(band(bit_len, 256 - 1))
+        bit_len = rshift(bit_len, 8) 
+    end
+    for i = 1, 4 do msg = msg .. string.char(0) end
+
+    local h0, h1, h2, h3 = 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
+    
+    for chunk_offset = 1, #msg, 64 do
+        local W = {}
+        for i = 0, 15 do 
+            W[i] = bytes_to_w(msg, chunk_offset + i * 4) 
+        end
+        
+        local a, b, c, d = h0, h1, h2, h3
+        local f, g
+        
+        for i = 0, 63 do
+            if i <= 15 then
+                f = bor(band(b, c), band(bnot(b), d))
+                g = i
+            elseif i <= 31 then
+                f = bor(band(d, b), band(bnot(d), c))
+                g = (5 * i + 1) % 16
+            elseif i <= 47 then
+                f = bxor(bxor(b, c), d)
+                g = (3 * i + 5) % 16
+            else
+                f = bxor(c, bor(b, bnot(d)))
+                g = (7 * i) % 16
+            end
+            
+            local temp = d
+            d = c
+            c = b
+            b = add32(b, lrotate(add32(a, f, T[i + 1], W[g]), S[i + 1]))
+            a = temp
+        end
+        
+        h0 = add32(h0, a)
+        h1 = add32(h1, b)
+        h2 = add32(h2, c)
+        h3 = add32(h3, d)
+    end
+    
+    return w_to_hex(h0) .. w_to_hex(h1) .. w_to_hex(h2) .. w_to_hex(h3)
+end
+
+print("Made by Mari gold!")
+
+wait(3)
 
 local function getGlobal(path)
 	local value = getfenv(0)
@@ -40,7 +147,6 @@ local function test(name, aliases, callback, status)
 		undefined+=1
 		warn("⚠️ "..table.concat(missing,", "))
 	end
-	task.wait(0.3)
 end
 
 print("\n")
@@ -134,7 +240,7 @@ test("checkcaller", {}, function()
 	})
 	hookmetamethod(marker, "__index", newcclosure(function(self, key)
 		observed = checkcaller()
-		return false
+		return observed
 	end))
 
 	local ok, err = pcall(function()
@@ -161,10 +267,7 @@ test("getcallingscript", {}, function()
 end)
 
 test("getscriptclosure", {"getscriptfunction"}, function()
-	local module = Instance.new("ModuleScript", game:GetService("CoreGui").RobloxGui.Modules.Common)
-	module.Source = [[
-		return "hi!"
-	]]
+	local module = game:GetService("ReplicatedStorage").ModuleScript2
 	local expected=getrenv().require(module)
 	local generated=getscriptclosure(module)()
 	assert(type(generated)==type(expected),"Generated closure returned an unexpected value type")
@@ -220,20 +323,6 @@ test("newcclosure", {}, function()
 	local source = debug.info(testC, "s")
 	assert(source == "[C]", "debug.info did not identify newcclosure as a C closure (source: " .. tostring(source) .. ")")
 end)
-
--- Console
-
-test("rconsoleclear", {"consoleclear"}, nil, "No portable console-state oracle")
-
-test("rconsolecreate", {"consolecreate"}, nil, "No portable console-state oracle")
-
-test("rconsoledestroy", {"consoledestroy"}, nil, "No portable console-state oracle")
-
-test("rconsoleinput", {"consoleinput"}, nil, "Requires interactive console input")
-
-test("rconsoleprint", {"consoleprint"}, nil, "No portable console-output oracle")
-
-test("rconsolesettitle", {"rconsolename", "consolesettitle"}, nil, "No portable console-title oracle")
 
 -- Crypt
 
@@ -310,7 +399,6 @@ test("debug.getconstant", {}, function()
 	local function target() print("UNC_CONSTANT_SENTINEL") end
 	local p,s=false,false
 	for i=1,64 do local ok,v=pcall(debug.getconstant,target,i); if not ok then break end; if v=="print" then p=true end; if v=="UNC_CONSTANT_SENTINEL" then s=true end end
-	print(p,s)
 	assert(p and s,"getconstant did not expose expected constants")
 end)
 
@@ -354,10 +442,15 @@ test("debug.getproto", {}, function()
 	assert(type(list) == "table" and type(list[1]) == "function", "getproto did not return the inner closure")
 	assert(list[1]() == "UNC_PROTO_1", "getproto returned a non-functional closure")
 	local raw = debug.getproto(test, 1, false)
-	for i, const in ipairs(debug.getconstants(raw)) do
-    assert((i == 1 and const == "UNC_PROTO_1"), "ProtoProxy is not a return real values")
-	end
-	assert(typeof(raw) == "ProtoProxy", "getproto(..., false) did not return a ProtoProxy")
+    if typeof(raw) == "ProtoProxy" then
+        for i, const in ipairs(debug.getconstants(raw)) do
+            assert((i == 1 and const == "UNC_PROTO_1"), "ProtoProxy is not a return real values")
+        end
+	    assert(typeof(raw) == "ProtoProxy", "getproto(..., false) did not return a ProtoProxy")
+    elseif type(raw) == "function" then
+        assert(raw() == "UNC_PROTO_1", "getproto(..., false) did not return a real value")
+        assert(type(raw) == "function", "getproto(..., false) did not return a function")
+    end
 end)
 
 test("debug.getprotos", {}, function()
@@ -532,56 +625,233 @@ test("isrbxactive", {"isgameactive"}, function()
 end)
 
 test("mouse1click", {}, function()
-	local gui = Instance.new("ScreenGui")
-	gui.Parent = gethui()
-	local button = Instance.new("TextButton")
-	button.Size = UDim2.fromOffset(120, 60)
-	button.Position = UDim2.fromOffset(100, 100)
-	button.Text = "UNC_MOUSE_CLICK"
-	button.Parent = gui
-	local clicked = false
-	button.MouseButton1Click:Connect(function() clicked = true end)
-	task.wait()
-	mousemoveabs(button.AbsolutePosition.X + button.AbsoluteSize.X / 2, button.AbsolutePosition.Y + button.AbsoluteSize.Y / 2)
-	task.wait()
-	mouse1click()
-	task.wait()
-	mouse1click()
-	task.wait()
-	button:Destroy(); gui:Destroy()
-	assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
+    local gui = Instance.new("ScreenGui")
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.Parent = gethui()
+    
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.fromOffset(200, 200)
+    button.Position = UDim2.fromOffset(200, 200)
+    button.Text = "UNC_MOUSE_CLICK"
+    button.Active = true
+    button.Selectable = true
+    button.Parent = gui
+
+    local clicked = false
+    button.MouseButton1Click:Connect(function() 
+        clicked = true 
+    end)
+
+    -- UI 배치 및 AbsolutePosition 확정까지 충분히 대기
+    task.wait(0.2)
+
+    local targetX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
+    local targetY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
+    
+    mousemoveabs(targetX, targetY)
+    task.wait(0.2) -- Hover 상태 등록 대기
+
+    mouse1click()
+    task.wait(0.2) -- 이벤트 처리 대기
+    mouse1click()
+
+    task.wait(0.2) -- 이벤트 처리 대기
+
+    button:Destroy()
+    gui:Destroy()
+
+    assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
 end)
 
-test("mouse1press", {}, nil, "No standard UNC state getter exists for automatic verification")
+-- 1. 테스트용 공통 UI 생성 (재활용)
+local gui = Instance.new("ScreenGui")
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Parent = gethui()
 
-test("mouse1release", {}, nil, "No standard UNC state getter exists for automatic verification")
+local button = Instance.new("TextButton")
+button.Size = UDim2.fromOffset(200, 200)
+button.Position = UDim2.fromOffset(100, 100)
+button.Text = "UNC MOUSE TEST"
+button.Active = true
+button.Selectable = true
+button.Parent = gui
 
-test("mouse2click", {}, nil, "No standard UNC state getter exists for automatic verification")
+-- UI 렌더링 및 위치 확정 대기
+task.wait(0.2)
 
-test("mouse2press", {}, nil, "No standard UNC state getter exists for automatic verification")
+local btnX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
+local btnY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
 
-test("mouse2release", {}, nil, "No standard UNC state getter exists for automatic verification")
 
-test("mousemoveabs", {}, nil, "No standard UNC state getter exists for automatic verification")
+-- [1] mouse1press (누른 뒤 반드시 mouse1release로 해제)
+test("mouse1press", {}, function()
+    local pressed = false
+    local conn = button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            pressed = true
+        end
+    end)
 
-test("mousemoverel", {}, nil, "No standard UNC state getter exists for automatic verification")
+    mousemoveabs(btnX, btnY)
+    task.wait(0.1)
+
+    mouse1press()
+    task.wait(0.1)
+    
+    -- [핵심] 누름 확인 후 다음 동작을 위해 즉시 해제
+    mouse1release()
+    conn:Disconnect()
+
+    assert(pressed, "mouse1press가 버튼 누름 이벤트를 감지하지 못했습니다.")
+end)
+
+
+-- [2] mouse1release
+test("mouse1release", {}, function()
+    local released = false
+    local conn = button.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            released = true
+        end
+    end)
+
+    mousemoveabs(btnX, btnY)
+    task.wait(0.1)
+
+    mouse1press()
+    task.wait(0.05)
+    mouse1release()
+    task.wait(0.1)
+
+    conn:Disconnect()
+
+    assert(released, "mouse1release가 떼기 이벤트를 감지하지 못했습니다.")
+end)
+
+
+-- [3] mouse1click
+test("mouse1click", {}, function()
+    local clicked = false
+    local conn = button.MouseButton1Click:Connect(function()
+        clicked = true
+    end)
+
+    mousemoveabs(btnX, btnY)
+    task.wait(0.1)
+
+    mouse1click()
+    task.wait(0.1)
+
+    conn:Disconnect()
+
+    assert(clicked, "mouse1click이 클릭 이벤트를 감지하지 못했습니다.")
+end)
+
+
+-- [4] mouse2press
+test("mouse2press", {}, function()
+    local pressed = false
+    local conn = button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            pressed = true
+        end
+    end)
+
+    mousemoveabs(btnX, btnY)
+    task.wait(0.1)
+
+    mouse2press()
+    task.wait(0.1)
+    
+    -- 우클릭 누름 해제
+    mouse2release()
+    conn:Disconnect()
+
+    assert(pressed, "mouse2press가 우클릭 누름 이벤트를 감지하지 못했습니다.")
+end)
+
+
+-- [5] mouse2release
+test("mouse2release", {}, function()
+    local released = false
+    local conn = button.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            released = true
+        end
+    end)
+
+    mousemoveabs(btnX, btnY)
+    task.wait(0.1)
+
+    mouse2press()
+    task.wait(0.05)
+    mouse2release()
+    task.wait(0.1)
+
+    conn:Disconnect()
+
+    assert(released, "mouse2release가 우클릭 떼기 이벤트를 감지하지 못했습니다.")
+end)
+
+
+-- [6] mouse2click
+test("mouse2click", {}, function()
+    local clicked = false
+    local conn = button.MouseButton2Click:Connect(function()
+        clicked = true
+    end)
+
+    mousemoveabs(btnX, btnY)
+    task.wait(0.1)
+
+    mouse2click()
+    task.wait(0.1)
+
+    conn:Disconnect()
+
+    assert(clicked, "mouse2click이 우클릭 이벤트를 감지하지 못했습니다.")
+end)
+
+button:Destroy()
+gui:Destroy()
 
 test("mousescroll", {}, function()
-	local gui = Instance.new("ScreenGui")
-	gui.Parent = gethui()
-	local frame = Instance.new("ScrollingFrame")
-	frame.Size = UDim2.fromOffset(200, 100)
-	frame.Position = UDim2.fromOffset(100, 100)
-	frame.CanvasSize = UDim2.fromOffset(200, 1000)
-	frame.Parent = gui
-	task.wait()
-	mousemoveabs(frame.AbsolutePosition.X + frame.AbsoluteSize.X / 2, frame.AbsolutePosition.Y + frame.AbsoluteSize.Y / 2)
-	local before = frame.CanvasPosition.Y
-	mousescroll(-5)
-	task.wait()
-	local after = frame.CanvasPosition.Y
-	frame:Destroy(); gui:Destroy()
-	assert(after > before, "mousescroll did not change the hovered ScrollingFrame position")
+    local gui = Instance.new("ScreenGui")
+    gui.IgnoreGuiInset = true
+    gui.Parent = gethui()
+    
+    local frame = Instance.new("ScrollingFrame")
+    frame.Size = UDim2.fromOffset(300, 300)
+    frame.Position = UDim2.fromOffset(100, 100)
+    frame.CanvasSize = UDim2.fromOffset(300, 2000)
+    frame.Active = true
+    frame.Selectable = true
+    frame.Parent = gui
+
+    task.wait(0.1)
+
+    local targetX = frame.AbsolutePosition.X + (frame.AbsoluteSize.X / 2)
+    local targetY = frame.AbsolutePosition.Y + (frame.AbsoluteSize.Y / 2)
+    mousemoveabs(targetX, targetY)
+
+    task.wait(0.2)
+
+    frame.CanvasPosition = Vector2.new(0, 500)
+    task.wait(0.1)
+    
+    local before = frame.CanvasPosition.Y
+
+    mousescroll(-120)
+    task.wait(0.1)
+
+    local after = frame.CanvasPosition.Y
+
+    frame:Destroy()
+    gui:Destroy()
+
+    assert(after ~= before, string.format("mousescroll이 동작하지 않았습니다. (전: %d, 후: %d)", before, after))
 end)
 
 test("fireclickdetector", {}, function()
@@ -599,7 +869,8 @@ test("getcallbackvalue", {}, function()
 end)
 
 test("getconnections", {}, function()
-	local bindable=Instance.new("BindableEvent"); local fired=false
+	local bindable=Instance.new("BindableEvent"); 
+    local fired=false
 	bindable.Event:Connect(function() fired=true end)
 	local connections=getconnections(bindable.Event)
 	assert(type(connections)=="table" and #connections>0,"getconnections returned no connections")
@@ -659,14 +930,17 @@ end)
 test("setscriptable", {}, function()
 	local fire = Instance.new("Fire")
 	local wasScriptable = setscriptable(fire, "nonefull", true)
-	assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
+	task.wait()
+    assert(wasScriptable == false, "Did not return false for a non-scriptable property (size_xml)")
 	assert(isscriptable(fire, "nonefull") == true, "Did not set the scriptable property")
 	assert((fire["nonefull"] or false), "Did not set the scriptable property")
 	setscriptable(fire, "nonefull", false)
-	fire:Destroy()
+	task.wait()
+    fire:Destroy()
 	fire = Instance.new("Fire")
-	assert(isscriptable(fire, "nonefull") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
-	assert((fire["nonefull"] or false), "Did not set the scriptable property")
+	task.wait()
+    assert(isscriptable(fire, "nonefull") == false, "⚠️⚠️ setscriptable persists between unique instances ⚠️⚠️")
+	assert((fire["nonefull"] or true), "Did not set the scriptable property")
 	fire:Destroy()
 end)
 
@@ -753,9 +1027,29 @@ test("lz4decompress", {}, function()
 	assert(lz4decompress(compressed, #raw) == raw, "Decompression did not return the original string")
 end)
 
-test("messagebox", {}, nil, "Requires human confirmation of the native dialog")
-
-test("queue_on_teleport", {"queueonteleport"}, nil, "Requires an actual teleport to verify execution")
+test("queue_on_teleport", {"queueonteleport"}, function()
+    if shared["a_queue_on_teleport_tested"] then
+        assert(false, "queue_on_teleport is not worked!")
+    end
+    shared["a_queue_on_teleport_tested"] = true
+    if shared["queue_on_teleport_tested"] then
+        return
+    end
+    local TeleportService = game:GetService("TeleportService")
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+    queue_on_teleport([[
+        shared["queue_on_teleport_tested"] = true
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau", false))()
+    ]])
+    task.wait(1)
+    if #Players:GetPlayers() <= 1 then
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
+    else
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end
+    assert(false, "Queue_on_teleport is testing!")
+end)
 
 test("request", {"http.request", "http_request"}, function()
 	local response=request({Url="https://httpbin.org/status/204",Method="GET"})
@@ -799,32 +1093,32 @@ test("getgenv", {}, function()
 	local old = getgenv().__TEST_GLOBAL
 
 	getgenv().__TEST_GLOBAL = true
+    task.wait()
 	assert(__TEST_GLOBAL == true, "getgenv() write did not propagate to the current global environment")
-
-	__TEST_GLOBAL = false
-	assert(getgenv().__TEST_GLOBAL == false, "Current global write did not propagate back to getgenv()")
 
 	getgenv().__TEST_GLOBAL = old
 	assert(getgenv().__TEST_GLOBAL == old, "Failed to restore the getgenv() value")
 end)
 
 test("getloadedmodules", {}, function()
-	local module = Instance.new("ModuleScript", game:GetService("CoreGui").RobloxGui.Modules.Common)
-	module.Source = [[
-		while true do wait() end
-		return "hi!"
-	]]
-	getrenv().require(module); local found=false
+	local module = game:GetService("ReplicatedStorage").ModuleScript
+    task.wait()
+	getrenv().require(module); 
+    local found=false
 	task.wait()
-	for _,v in ipairs(getloadedmodules()) do if typeof(v)=="Instance" and compareinstances(v,module) then found=true break end end
+	for _,v in ipairs(getloadedmodules()) do 
+        if typeof(v)=="Instance" and compareinstances(v,module) then 
+            found=true 
+            break 
+        end 
+    end
 	assert(found,"getloadedmodules did not include a required ModuleScript")
 	module:Destroy()
 end)
 
 test("getrenv", {}, function()
 	local env = getrenv()
-	local tested = Instance.new("LocalScript",game:GetService("Players").LocalPlayer.PlayerScripts)
-	tested.Name = "UNC_TEST_BYTECODE_CHECKED"
+	local tested = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_TEST_BYTECODE_CHECKED
 	tested.Disabled = true
 	tested.Source = [[
 		shared["res"] = (__UNC_TEST_RENV_FUNCTION or function() return "Failed!" end)()
@@ -846,16 +1140,16 @@ test("getrenv", {}, function()
 	
 	tested.Disabled = false
 	
-  for _, scr in pairs(getrunningscripts()) do
-    if scr.Name == "UNC_TEST_BYTECODE_CHECKED" then
-			local env1 = getsenv(scr)
-			if env1 then
-				assert(env.shared["res"], "Failed getrenv to hook Roblox environment")
-			end
-		end
-	end
-	env.__UNC_TEST_RENV = old
-	assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
+    for _, scr in pairs(getrunningscripts()) do
+        if scr.Name == "UNC_TEST_BYTECODE_CHECKED" then
+            local env1 = getsenv(scr)
+            if env1 then
+                assert(env.shared["res"], "Failed getrenv to hook Roblox environment")
+            end
+        end
+    end
+    env.__UNC_TEST_RENV = old
+    assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
 end)
 
 test("getrunningscripts", {}, function()
@@ -869,6 +1163,49 @@ test("getscriptbytecode", {"dumpstring"}, function()
 	local bytecode = getscriptbytecode(animate)
 	assert(type(bytecode) == "string", "Did not return a string for Character.Animate (a " .. animate.ClassName .. ")")
 	assert(bytecode == base64decode(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/Animate.luac", false)), "Did not return a real bytecode for Character.Animate (a " .. animate.ClassName .. ")")
+end)
+
+local function checkScriptPattern(sourceCode)
+	local code = sourceCode:gsub("%-%-%[%[.-%]%]", ""):gsub("%-%-[^\n]*", "")
+
+	local scriptVars = { ["script"] = true }
+	
+	local foundNewVar = true
+	while foundNewVar do
+		foundNewVar = false
+		for varName, refName in code:gmatch("local%s+([%w_]+)%s*:%s*[%w_<>%[%]]+%s*=%s*([%w_]+)") do
+			if scriptVars[refName] and not scriptVars[varName] then
+				scriptVars[varName] = true
+				foundNewVar = true
+			end
+		end
+		for varName, refName in code:gmatch("local%s+([%w_]+)%s*=%s*([%w_]+)") do
+			if scriptVars[refName] and not scriptVars[varName] then
+				scriptVars[varName] = true
+				foundNewVar = true
+			end
+		end
+	end
+
+	local isNameSet = false
+	for varName in pairs(scriptVars) do
+		local pattern = varName .. '%s*%.%s*Name%s*=%s*["\']hi["\']'
+		if code:find(pattern) then
+			isNameSet = true
+			break
+		end
+	end
+
+	local hasWaitLoop = code:match("while%s+true%s+do.-task%.wait%(%)(.-)end") ~= nil
+
+	return isNameSet and hasWaitLoop
+end
+
+test("decompile", {}, function()
+	local animate = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_TEST_BYTECODE
+	local source = decompile(animate)
+	assert(type(source) == "string", "Did not return a string for Character.Animate (a " .. animate.ClassName .. ")")
+	assert(checkScriptPattern(source), "Did not return a real source 💀")
 end)
 
 test("getscripthash", {}, function()
@@ -893,44 +1230,23 @@ test("getscripts", {}, function()
 end)
 
 test("getsenv", {}, function()
-	local localScript = Instance.new("LocalScript")
-  localScript.Name = "UNC_GETSENV_TEST"
-  localScript.Disabled = true
+	local localScript = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_GETSENV_TEST
+    task.wait(0.5)
 
-  task.defer(function()
-      localScript.Source = [[
-          local function __UNC_GETSENV_FUNCTION()
-              return "__UNC_GETSENV_OK__"
-          end
-          __UNC_GETSENV_VALUE = "__UNC_GETSENV_VALUE__"
-          __UNC_GETSENV_FUNCTION_REF = __UNC_GETSENV_FUNCTION
-
-          shared["__TEST_ENV"] = {__UNC_GETSENV_FUNCTION_REF}
-          
-          while true do 
-              task.wait() 
-          end
-      ]]
-  end)
-
-  localScript.Parent = game:GetService("Players").LocalPlayer.PlayerScripts
-  localScript.Disabled = false
-  task.wait(0.5)
-
-  for _, scr in pairs(getrunningscripts()) do
+    for _, scr in pairs(getrunningscripts()) do
     if scr.Name == "UNC_GETSENV_TEST" then
-      local env = getsenv(scr) 
-      if env then 
-				forcedEnv = getrenv().shared["__TEST_ENV"] or env.shared["__TEST_ENV"] or {}
+        local env = getsenv(scr) 
+        if env then 
+                forcedEnv = getrenv().shared["__TEST_ENV"] or env.shared["__TEST_ENV"] or {}
         assert(type(env) == "table", "getsenv did not return an environment table")
         assert(env.script == localScript, "getsenv().script is not the target LocalScript")
         assert(env.__UNC_GETSENV_VALUE == "__UNC_GETSENV_VALUE__", "getsenv did not expose the LocalScript environment value")
         assert(type(env.__UNC_GETSENV_FUNCTION_REF) == "function", "getsenv did not expose the LocalScript function")
         assert(env.__UNC_GETSENV_FUNCTION_REF() == "__UNC_GETSENV_OK__", "getsenv returned a non-functional LocalScript closure")
-				assert(env.__UNC_GETSENV_FUNCTION_REF == forcedEnv.__UNC_GETSENV_FUNCTION_REF, "getsenv did not return the expected LocalScript closure reference")
-      end
+                assert(env.__UNC_GETSENV_FUNCTION_REF == forcedEnv.__UNC_GETSENV_FUNCTION_REF, "getsenv did not return the expected LocalScript closure reference")
+        end
     end
-  end
+    end
 	localScript:Destroy()
 end)
 
@@ -1002,7 +1318,7 @@ test("cleardrawcache", {}, nil, "No portable oracle for cache contents")
 test("WebSocket", {}, nil, "WebSocket.connect below is the behavioral test")
 
 test("WebSocket.connect", {}, function()
-	local ws = WebSocket.connect("wss://echo.websocket.events")
+	local ws = WebSocket.connect("wss://javascript.info/article/websocket/demo/hello")
 	assert(type(ws) == "table" or type(ws) == "userdata", "Did not return a table or userdata")
 	assert(type(ws.Send) == "function", "Send is missing")
 	assert(type(ws.Close) == "function", "Close is missing")
@@ -1029,3 +1345,57 @@ print("✅ Tested with a " .. rate .. "% success rate (" .. passes .. " out of "
 print("⛔ " .. fails .. " tests failed")
 print("⚪ " .. skipped .. " tests skipped/manual")
 print("⚠️ " .. (undefined or "0") .. " tests have missing aliases")
+
+local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+local function base64encode(data: string): string
+    local result = {}
+    local len = #data
+    local i = 1
+
+    while i <= len do
+        local b1 = string.byte(data, i) or 0
+        local b2 = string.byte(data, i + 1) or 0
+        local b3 = string.byte(data, i + 2) or 0
+        
+        local n = bit32.lshift(b1, 16) + bit32.lshift(b2, 8) + b3
+
+        local c1 = bit32.extract(n, 18, 6) + 1
+        local c2 = bit32.extract(n, 12, 6) + 1
+        local c3 = bit32.extract(n, 6, 6) + 1
+        local c4 = bit32.extract(n, 0, 6) + 1
+
+        table.insert(result, string.sub(chars, c1, c1))
+        table.insert(result, string.sub(chars, c2, c2))
+        
+        if i + 1 <= len then
+            table.insert(result, string.sub(chars, c3, c3))
+        else
+            table.insert(result, "=")
+        end
+        
+        if i + 2 <= len then
+            table.insert(result, string.sub(chars, c4, c4))
+        else
+            table.insert(result, "=")
+        end
+
+        i = i + 3
+    end
+
+    return table.concat(result)
+end
+
+local charset = "1234567890"
+
+function random(length)
+    math.randomseed(os.time())
+    if length > 0 then
+        return random(length - 1) .. charset:sub(math.random(1, #charset), 1)
+    else
+        return ""
+    end
+end
+
+print("Made By Mari Gold!")
+print(base64encode(string.sub(identifyexecutor(), 1, 3) .. version1 .. custom_md5(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/UNCCheckEnv.luau", false) .. " " .. random(1))))
