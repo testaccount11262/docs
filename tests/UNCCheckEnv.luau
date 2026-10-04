@@ -1,7 +1,19 @@
-local version1 = "1.0.2"
-print(game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.date(), false))
-if version1 ~= game:HttpGet("https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.date(), false) then
-	print("Outdata!")
+local version1 = "1.0.3"
+
+local url = "https://raw.githubusercontent.com/testaccount11262/docs/refs/heads/feat/unc-compatibility-test/tests/version?t=" .. os.time()
+local success, response = pcall(function()
+    return game:HttpGet(url, false)
+end)
+
+if success and response then
+    local currentVersion = response:gsub("^%s*(.-)%s*$", "%1")
+
+    if version1 ~= currentVersion then
+        print("Outdata! (Now Version: " .. version1 .. " / New Version: " .. currentVersion .. ")")
+        return
+    end
+else
+    print("Failed Load Version!")
     return
 end
 
