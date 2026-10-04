@@ -652,23 +652,19 @@ test("mouse1click", {}, function()
         end
     end)
 
-    -- UI 배치 및 AbsolutePosition 확정까지 충분히 대기
     task.wait(0.2)
 
     local targetX = button.AbsolutePosition.X + (button.AbsoluteSize.X / 2)
     local targetY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
     
     mousemoveabs(targetX, targetY)
-    task.wait(0.2) -- Hover 상태 등록 대기
+    task.wait(0.2)
 
     mouse1click()
-    task.wait(0.2) -- 이벤트 처리 대기
+    task.wait(0.2)
     mouse1click()
 
-    task.wait(0.2) -- 이벤트 처리 대기
-
-    button:Destroy()
-    gui:Destroy()
+    task.wait(0.2)
 
     assert(clicked, "mouse1click did not activate the GUI button at the cursor position")
 end)
