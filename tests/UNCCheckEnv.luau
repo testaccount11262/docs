@@ -1,4 +1,4 @@
-local version1 = "1.0.5"
+local version1 = "1.0.6"
 
 local passes, fails, skipped, undefined = 0, 0, 0, 0
 
@@ -548,6 +548,11 @@ local btnY = button.AbsolutePosition.Y + (button.AbsoluteSize.Y / 2)
 
 if mousemoveabs then
 	mousemoveabs(btnX + 1, btnY + 1)
+	task.wait()
+	mousemoveabs(btnX + 0.5, btnY + 1)
+	task.wait()
+	mousemoveabs(btnX + 0.5, btnY + 0.5)
+	task.wait()
 	mousemoveabs(btnX, btnY)
 end
 task.wait(0.5)
@@ -984,17 +989,27 @@ test("getrenv", {}, function()
 		return "PASSED!"
 	end)
 
-	tested.Disabled = false
-
 	for _, scr in pairs(getrunningscripts()) do
 		if scr.Name == "UNC_TEST_BYTECODE_CHECKED" then
 			local env1 = getsenv(scr)
 			if env1 then
-				assert(env.shared["res"], "Failed getrenv to hook Roblox environment")
+				env1.shared["hi"] = true
+				task.wait(0.2)
+			end
+
+			local env2 = getsenv(scr)
+			if env2 then
+				assert(
+					(
+						(env2.shared["res"] or {
+							["__UNC_TEST_RENV_FUNCTION"] = function() 
+								return "fuck!" 
+							end
+						}).__UNC_TEST_RENV_FUNCTION() == "PASSED!" or false
+					), "Failed getrenv to hook Roblox environment")
 			end
 		end
 	end
-	tested.Disabled = true
 	env.__UNC_TEST_RENV = old
 	assert(env.__UNC_TEST_RENV == old, "Failed to restore getrenv() environment")
 end)
@@ -1078,7 +1093,7 @@ end)
 
 test("getsenv", {}, function()
 	local localScript = game:GetService("Players").LocalPlayer.PlayerScripts.UNC_GETSENV_TEST
-	tested.Disabled = false
+	localScript.Disabled = false
 	task.wait(0.5)
 
 	for _, scr in pairs(getrunningscripts()) do
@@ -1095,7 +1110,7 @@ test("getsenv", {}, function()
 			end
 		end
 	end
-	tested.Disabled = true
+	localScript.Disabled = true
 end)
 
 test("getthreadidentity", {"getidentity", "getthreadcontext", "setthreadidentity", "setidentity", "setthreadcontext"}, function()
